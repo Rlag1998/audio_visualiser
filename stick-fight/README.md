@@ -41,6 +41,11 @@ npm start                      # python3 -m http.server 8080
 
 Then open <http://localhost:8080/>. There is no build step and no dependencies.
 
+`npm run bundle` flattens the module tree into a single self-contained HTML file in
+`dist/` — handy for sharing, or for running it straight off disk where `file://` would
+otherwise block the module loader. It refuses to build if two modules ever declare the
+same top-level name, since that is the one assumption flat concatenation rests on.
+
 ## Modes
 
 | Mode | What it is |
@@ -275,6 +280,7 @@ src/
   input/     input.js                       keyboard + gamepad
   ui/        ui.js                          menus and lab DOM
   main.js                                   app shell and the fixed-timestep loop
+tools/       bundle.mjs                      single-file build
 test/        engine.test.mjs, match.test.mjs
 ```
 

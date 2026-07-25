@@ -10,7 +10,8 @@
     "test": "node --test \"test/*.test.mjs\"",
     "sim": "node src/sim/cli.mjs",
     "tournament": "node src/sim/cli.mjs tournament 30",
-    "balance": "node src/sim/balance.mjs 60 veteran"
+    "balance": "node src/sim/balance.mjs 60 veteran",
+    "bundle": "node tools/bundle.mjs dist/stick-fight.html"
   },
   "keywords": [
     "fighting-game",
