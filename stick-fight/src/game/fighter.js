@@ -251,6 +251,11 @@ export class Fighter {
     const blockHeldLast = this._blockHeld;
     this._blockHeld = !!cmd.block;
 
+    // Cleared up front, not per-branch: several states return early below, and
+    // a stale `true` here would tell _physics the fighter is under its own
+    // power and skip ground friction — so knockback would never decay.
+    this._driving = false;
+
     switch (this.state) {
       case STATE.HURT:
       case STATE.BLOCKSTUN:
@@ -261,13 +266,16 @@ export class Fighter {
         return;
       }
 
+      case STATE.VICTORY:
+        // Held until the match resets the round — otherwise the pose would be
+        // overwritten on the very next tick and never actually render.
+        return;
+
       case STATE.DASH: {
         this.stateT--;
         if (this.stateT > MOVEMENT.dashRecovery) {
           this.vx = this.dashDir * MOVEMENT.dashSpeed;
           this._driving = true;
-        } else {
-          this._driving = false;
         }
         if (this.stateT <= 0) this.state = STATE.IDLE;
         return;
@@ -313,8 +321,6 @@ export class Fighter {
     }
 
     // ---- grounded, actionable ------------------------------------------------
-    this._driving = false;
-
     if (cmd.attack && this.canAttack(cmd.attack)) {
       this._startAttack(cmd.attack, 0);
       return;
@@ -483,6 +489,13 @@ export class Fighter {
       this.state = STATE.BLOCKSTUN;
       this.stateT = move.blockstun;
 
+      // Chip finishes rounds. Without this a fighter sits at an empty health
+      // bar indefinitely, because the match only ends on a KO state.
+      if (this.health <= 0) {
+        this._ko(away * move.kbX * 0.8, move.kbY + 200, away * -0.1);
+        return { type: 'ko', chip: true, damage: chip, x: contact.x, y: contact.y, move };
+      }
+
       if (this.guard <= 0 || move.guardBreak) {
         this.guard = STATS.maxGuard * 0.5;
         this.stagger(COMBAT.guardBreakStun);
@@ -504,6 +517,10 @@ export class Fighter {
     this.hitstop = move.guardBreak || move.knockdown ? COMBAT.heavyHitstop : COMBAT.hitstop;
     this.combo = 0;
     this.comboTimer = 0;
+    // Cleared explicitly: _timers only resets this when the timer *counts down*
+    // to zero, so zeroing the timer here would otherwise leave the running
+    // total to be reported on top of the next combo.
+    this.comboDamage = 0;
 
     const kbx = away * move.kbX;
     if (this.health <= 0) {
@@ -587,13 +604,25 @@ export class Fighter {
   onHitLanded(result) {
     this.moveHit = true;
     this.canCancel = result.type === 'hit' || result.type === 'launch' || result.type === 'block';
-    if (result.type !== 'block' && result.type !== 'parry') {
+
+    // A guard break connected with a guard, not a body — it must not start a
+    // combo, or the punish that follows it opens already damage-scaled.
+    const cleanHit = result.type !== 'block' && result.type !== 'parry' &&
+      result.type !== 'guardBreak' && !result.chip;
+    if (cleanHit) {
       this.combo++;
       this.comboDamage += result.damage;
       this.comboTimer = COMBAT.comboWindow;
     }
     this.meter = Math.min(STATS.maxMeter, this.meter + result.damage * STATS.meterOnDeal);
-    this.hitstop = result.move.guardBreak || result.move.knockdown ? COMBAT.heavyHitstop : COMBAT.hitstop;
+
+    // Blocked attacks freeze the attacker for the *block* duration. Reading the
+    // move's knockdown flag here instead would leave a blocked sweep frozen 6
+    // frames longer than the defender, quietly making it far more punishable
+    // than its frame data claims.
+    const blocked = result.type === 'block' || result.type === 'guardBreak' || result.chip;
+    if (blocked) this.hitstop = COMBAT.blockHitstop;
+    else this.hitstop = result.move.guardBreak || result.move.knockdown ? COMBAT.heavyHitstop : COMBAT.hitstop;
   }
 
   // --------------------------------------------------------------- animation
@@ -606,7 +635,12 @@ export class Fighter {
       case STATE.ATTACK: {
         const prog = this.mTotal > 0 ? this.moveFrame / this.mTotal : 0;
         sampleTrack(this.move, clamp(prog, 0, 1), t);
-        rate = 40;
+        // Attacks track their pose almost rigidly. At a gentler rate the limb
+        // lags far enough behind the authored keyframes that it never reaches
+        // the extension the frame data promises — kicks fell ~30 units short of
+        // their stated reach, which the AI then threw from ranges that could
+        // not connect.
+        rate = 90;
         break;
       }
       case STATE.WALK: {

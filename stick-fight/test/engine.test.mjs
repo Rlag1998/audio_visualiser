@@ -12,6 +12,7 @@ import { Ragdoll } from '../src/game/ragdoll.js';
 import { ARENA, BODY, COMBAT, STATS, TICK } from '../src/game/config.js';
 import { makeRng } from '../src/core/rng.js';
 import { segPointDist2 } from '../src/core/math.js';
+import { measureAll } from '../src/sim/reach.mjs';
 
 // ---------------------------------------------------------------- move data
 
@@ -59,9 +60,55 @@ test('sampleTrack stays finite across the whole move and clamps outside it', () 
 });
 
 test('kicks out-range punches, as the design intends', () => {
-  assert.ok(MOVE_REACH.highKick > MOVE_REACH.jab);
+  assert.ok(MOVE_REACH.highKick > MOVE_REACH.cross, 'the longest kick should beat the longest punch');
   assert.ok(MOVE_REACH.lowKick > MOVE_REACH.hook);
   assert.ok(MOVE_REACH.uppercut < MOVE_REACH.cross, 'uppercut is the short-range launcher');
+});
+
+test('MOVE_REACH matches where the hitbox actually goes', () => {
+  // The AI decides whether to throw a move by comparing the gap against
+  // MOVE_REACH. When the table and the skeleton disagree the AI throws attacks
+  // that physically cannot land — which is exactly what happened when the pose
+  // tracks were timed by hand and the limb was still tucked during the active
+  // frames. This keeps the two honest.
+  for (const { id, reach } of measureAll()) {
+    const declared = MOVE_REACH[id];
+    assert.ok(
+      Math.abs(reach - declared) <= 6,
+      `${id}: MOVE_REACH says ${declared} but the hitbox reaches ${reach.toFixed(1)}`,
+    );
+  }
+});
+
+test('every attack has its hitbox where it can hit something', () => {
+  // A hurtbox stack runs from the floor to about y=126. A hitbox entirely
+  // outside that band is unhittable no matter how the frame data reads.
+  for (const { id, low, high } of measureAll()) {
+    assert.ok(high > 0, `${id}: hitbox never rises above the floor`);
+    assert.ok(low < 140, `${id}: hitbox sits above everything it could hit`);
+    if (MOVES[id].height === 'low') {
+      assert.ok(low < 45, `${id} is a low, but its hitbox starts at y=${low.toFixed(0)}`);
+    }
+  }
+});
+
+test('the limb is fully extended while the hitbox is live', () => {
+  // Guards the buildTrack timing: the strike keyframe must bracket the active
+  // window, not land after it.
+  for (const id of MOVE_IDS) {
+    const m = MOVES[id];
+    const total = m.startup + m.active + m.recovery;
+    const strikeKeys = m.track.filter((k, i) => i === 2 || i === 3);
+    assert.equal(strikeKeys.length, 2);
+    assert.ok(
+      strikeKeys[0].t <= m.startup / total + 1e-9,
+      `${id}: full extension arrives after the hitbox turns on`,
+    );
+    assert.ok(
+      strikeKeys[1].t >= (m.startup + m.active) / total - 1e-9 || strikeKeys[1].t >= 0.97,
+      `${id}: extension ends before the hitbox turns off`,
+    );
+  }
 });
 
 // ------------------------------------------------------------------- poses
@@ -228,6 +275,37 @@ test('holding block does not re-arm the parry window (regression)', () => {
   for (let i = 0; i < 40; i++) b.update(TICK, cmd, null);
   assert.ok(b.blockAge > COMBAT.parryWindow, `blockAge reset to ${b.blockAge} while holding guard`);
   assert.equal(b.receiveAttack(MOVES.jab, a, { x: 0, y: 90 }).type, 'block');
+});
+
+test('knockback decays even when the victim was walking (regression)', () => {
+  // `_driving` used to survive the transition into HURT, which told the physics
+  // step the fighter was moving under its own power and skipped ground
+  // friction — so a fighter hit mid-walk slid at full knockback speed.
+  const [a, b] = makePair();
+  const walk = makeCmd();
+  walk.x = -1;
+  for (let i = 0; i < 5; i++) b.update(TICK, walk, null);
+  assert.equal(b.state, STATE.WALK);
+
+  b.receiveAttack(MOVES.cross, a, { x: 0, y: 90 });
+  const launch = Math.abs(b.vx);
+  assert.ok(launch > 50, 'expected real knockback to measure decay against');
+
+  const idle = makeCmd();
+  b.hitstop = 0;
+  for (let i = 0; i < 8; i++) b.update(TICK, idle, null);
+  assert.ok(Math.abs(b.vx) < launch * 0.85, `knockback did not decay: ${launch} -> ${Math.abs(b.vx)}`);
+});
+
+test('chip damage can finish a round', () => {
+  const [a, b] = makePair();
+  b.health = 0.5;
+  guard(b);
+  const r = b.receiveAttack(MOVES.hook, a, { x: 0, y: 90 });
+  assert.equal(r.type, 'ko', 'a blocked hit on an empty health bar must still end it');
+  assert.equal(r.chip, true);
+  assert.equal(b.health, 0);
+  assert.equal(b.state, STATE.KO);
 });
 
 test('guard breaks when the guard meter runs out', () => {

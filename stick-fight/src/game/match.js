@@ -168,31 +168,40 @@ export class Match {
 
     // 2. fighters advance
     for (let i = 0; i < 2; i++) {
-      const f = this.fighters[i];
-      f.update(dt, this.cmds[i], this);
-      for (const ev of f.events) {
-        if (ev.type === 'swing') this.noteThrow(i, ev.move.id);
-        else if (ev.type === 'whiff') this.stats[i].whiffs++;
-        this.events.push({ ...ev, fighter: f, index: i });
-      }
+      this.fighters[i].update(dt, this.cmds[i], this);
+      this._drain(i);
     }
 
     // 3. world constraints
     this._faceOff();
     this._separate();
 
-    // 4. combat
-    this._resolveHits(0, 1);
-    this._resolveHits(1, 0);
+    // 4. combat. Both hitboxes are tested against the same pre-hit world before
+    //    either lands, so two attacks connecting on the same frame trade —
+    //    resolving them one at a time would let the first hit cancel the
+    //    second attacker's move and hand fighter 0 a permanent free win.
+    const hitA = this._detectHit(0, 1);
+    const hitB = this._detectHit(1, 0);
+    if (hitA) this._applyHit(0, 1, hitA);
+    if (hitB) this._applyHit(1, 0, hitB);
+
+    // Knockdowns and KOs raise their events from inside combat resolution, so
+    // they need a second drain or they would be wiped by the next update().
+    this._drain(0);
+    this._drain(1);
 
     // 5. clock
     this.timeLeft = Math.max(0, this.timeLeft - dt);
 
     // 6. round end conditions
-    const koIdx = this.fighters.findIndex((f) => f.state === STATE.KO);
-    if (koIdx >= 0) {
-      this.stats[1 - koIdx].kos++;
-      this._beginKo(1 - koIdx);
+    const koA = this.p1.state === STATE.KO;
+    const koB = this.p2.state === STATE.KO;
+    if (koA || koB) {
+      // Trades can drop both fighters on the same frame — that is a draw round,
+      // not a win for whoever happens to be first in the array.
+      const winner = koA && koB ? null : koA ? 1 : 0;
+      if (winner !== null) this.stats[winner].kos++;
+      this._beginKo(winner);
       return;
     }
     if (this.timeLeft <= 0) {
@@ -208,7 +217,7 @@ export class Match {
   _beginKo(winnerIdx) {
     this.phase = PHASE.KO;
     this.phaseT = ROUND.koFrames;
-    this._setAnnounce('K.O.', ROUND.koFrames, 'ko');
+    this._setAnnounce(winnerIdx === null ? 'DOUBLE K.O.' : 'K.O.', ROUND.koFrames, 'ko');
     // Note: named distinctly from the fighter-level 'ko' event, which carries a
     // `fighter` reference that consumers rely on.
     this.events.push({ type: 'roundKo', winner: winnerIdx });
@@ -229,8 +238,12 @@ export class Match {
   _endRound(winnerIdx, reason) {
     this.lastRoundResult = { round: this.round, winner: winnerIdx, reason };
     if (winnerIdx !== null && winnerIdx !== undefined) {
-      this.fighters[winnerIdx].wins++;
-      this.fighters[winnerIdx].state = STATE.VICTORY;
+      const champ = this.fighters[winnerIdx];
+      champ.wins++;
+      // Never stamp VICTORY over a fighter who is still a ragdoll: that state
+      // is what drives them to stand back up, and overwriting it would leave
+      // the winner face down on the floor celebrating.
+      if (!champ.isDown) champ.state = STATE.VICTORY;
     }
     this.phase = PHASE.ROUND_END;
     this.phaseT = ROUND.roundEndFrames;
@@ -259,6 +272,7 @@ export class Match {
   restartRound() {
     this.p1.resetRound(-START_X, 1);
     this.p2.resetRound(START_X, -1);
+    this._resetControllers();
     this.timeLeft = this.roundTime;
     this.phase = PHASE.FIGHT;
     this.phaseT = 0;
@@ -266,10 +280,18 @@ export class Match {
     this._pendingWinner = null;
   }
 
+  /** Controllers carry perception history that must not cross a round boundary. */
+  _resetControllers() {
+    for (const c of this.controllers) {
+      if (c && typeof c.reset === 'function') c.reset();
+    }
+  }
+
   _nextRound() {
     this.round++;
     this.p1.resetRound(-START_X, 1);
     this.p2.resetRound(START_X, -1);
+    this._resetControllers();
     this.timeLeft = this.roundTime;
     this.phase = PHASE.INTRO;
     this.phaseT = ROUND.introFrames;
@@ -319,17 +341,36 @@ export class Match {
     else if (Math.abs(b.x) >= limit - 0.01) a.x = clamp(b.x - dir * minGap, -limit, limit);
   }
 
-  _resolveHits(ai, di) {
+  /** Collect a fighter's pending events into the match stream, then clear them. */
+  _drain(i) {
+    const f = this.fighters[i];
+    if (!f.events.length) return;
+    for (const ev of f.events) {
+      if (ev.type === 'swing') this.noteThrow(i, ev.move.id);
+      else if (ev.type === 'whiff') this.stats[i].whiffs++;
+      this.events.push({ ...ev, fighter: f, index: i });
+    }
+    f.events.length = 0;
+  }
+
+  /** Pure test: does this fighter's live hitbox touch the other? No mutation. */
+  _detectHit(ai, di) {
     const attacker = this.fighters[ai];
     const defender = this.fighters[di];
-    if (!attacker.moveActive || attacker.moveHit) return;
+    if (!attacker.moveActive || attacker.moveHit) return null;
 
     const move = attacker.move;
     const joint = attacker.skeleton.joints[move.hitJoint];
-    if (!joint) return;
+    if (!joint) return null;
 
     const contact = overlapVolume(joint.x, joint.y, move.hitR, defender.volumes);
-    if (!contact) return;
+    return contact ? { move, contact } : null;
+  }
+
+  _applyHit(ai, di, detected) {
+    const attacker = this.fighters[ai];
+    const defender = this.fighters[di];
+    const { move, contact } = detected;
 
     const result = defender.receiveAttack(move, attacker, contact);
     if (!result) return;
@@ -356,19 +397,25 @@ export class Match {
     const sd = this.stats[di];
     const mv = sa.byMove[result.move.id];
 
-    switch (result.type) {
-      case 'block':
-      case 'guardBreak':
-        sa.blocked++;
-        if (mv) mv.blocked++;
-        break;
-      case 'parry':
-        sd.parries++;
-        break;
-      default:
-        sa.hits++;
-        if (mv) mv.hit++;
-        break;
+    if (result.chip) {
+      // A chip knockout: it was blocked, and it still ended the round.
+      sa.blocked++;
+      if (mv) mv.blocked++;
+    } else {
+      switch (result.type) {
+        case 'block':
+        case 'guardBreak':
+          sa.blocked++;
+          if (mv) mv.blocked++;
+          break;
+        case 'parry':
+          sd.parries++;
+          break;
+        default:
+          sa.hits++;
+          if (mv) mv.hit++;
+          break;
+      }
     }
     if (result.damage > 0) {
       sa.damageDealt += result.damage;

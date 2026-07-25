@@ -10,9 +10,16 @@ headless under Node, thousands of matches at a time, so balance questions get an
 with numbers instead of opinions.
 
 ```
-Boxer vs Kickboxer, 400 matches, Veteran AI — about 9 seconds
-  Boxer      ███████████░░░░░░░░░  54.0%    210.4 dmg/match   48% accuracy
-  Kickboxer  █████████░░░░░░░░░░░  46.0%    203.8 dmg/match   49% accuracy
+$ npm run balance          # 1800 matches across 5 seeds, ~45 seconds
+
+    archetype      mean     sd   worst    best   under <-- 50% --> over
+    Duelist       52.0%   1.6%   50.0%   53.9%   ...............|.#............
+    Boxer         50.3%   3.7%   46.7%   55.6%   ...............#..............
+    Kickboxer     48.9%   3.9%   41.7%   53.3%   ..............#|..............
+    Brawler       48.8%   3.6%   44.4%   52.8%   ..............#|..............
+
+  worst deviation from even: 2.0 points
+  BALANCED — within 4 points
 ```
 
 ## Running it
@@ -63,17 +70,26 @@ Gamepads are picked up automatically if one is plugged in.
 punished, nothing in between. The AI reads this table too, so it knows a slow move is a
 bad idea when you are about to recover.
 
-| Move | Startup | Active | Recovery | Damage | Guard height | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| Jab | 4 | 3 | 9 | 6 | high | The poke. Starts everything. |
-| Cross | 7 | 4 | 15 | 12 | high | The workhorse. |
-| Hook | 11 | 4 | 19 | 17 | high | Commitment. Punishable on whiff. |
-| Uppercut | 9 | 4 | 23 | 15 | mid | Launcher. Anti-air. Awful on block. |
-| Low kick | 8 | 4 | 15 | 10 | low | Goes under a standing guard. |
-| High kick | 13 | 5 | 23 | 19 | high | Longest normal. Sails over a crouch. |
-| Sweep | 10 | 5 | 22 | 9 | low | Knocks down. |
-| Finisher | 16 | 6 | 26 | 30 | mid | Breaks guards, cannot be parried. |
-| Air kick | 6 | 8 | 10 | 13 | high | Air only. |
+| Move | Startup | Active | Recovery | Damage | Reach | Guard height | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Jab | 4 | 3 | 9 | 6 | 79 | high | The poke. Starts everything. |
+| Cross | 7 | 4 | 15 | 12 | 82 | high | The workhorse. Longest punch. |
+| Hook | 11 | 4 | 19 | 17 | 73 | high | Close-range commitment. Punishable on whiff. |
+| Uppercut | 9 | 4 | 23 | 15 | 59 | mid | Launcher. Anti-air. Shortest reach, awful on block. |
+| Low kick | 8 | 4 | 15 | 10 | 81 | low | Goes under a standing guard. |
+| High kick | 13 | 5 | 23 | 19 | 85 | high | Longest normal. Sails over a crouch. |
+| Sweep | 10 | 5 | 22 | 9 | 83 | low | Knocks down. |
+| Finisher | 16 | 6 | 26 | 30 | 89 | mid | Breaks guards, cannot be parried. |
+| Air kick | 6 | 8 | 10 | 13 | 78 | high | Air only. |
+
+Reach is in world units from the fighter's root — a fighter is 124 tall, and the pushbox
+keeps them 38 apart, so a jab barely covers the gap from neutral. Those numbers are not
+hand-written: `node src/sim/reach.mjs` performs each move and measures where the hitbox
+actually travels, and a test fails if the table drifts more than 6 units from reality. The
+animation is generated from the frame data for the same reason — the strike pose is placed
+so the limb is fully extended before the hitbox switches on and still extended when it
+switches off. Author the two separately and you get a hitbox that is live while the leg is
+still tucked.
 
 **Guard height.** Standing guard stops highs and mids; crouching guard stops lows and
 mids. So sweeps and low kicks beat a standing guard, and high kicks beat a crouching one.
@@ -107,35 +123,29 @@ the AI's move weights make each one *look* different in motion.
 
 | | Damage | Speed | Damage taken | Stamina | Plays like |
 | --- | --- | --- | --- | --- | --- |
-| **Boxer** | ×0.97 | ×1.06 | ×0.93 | ×1.10 | Lives in punch range, tight guard |
-| **Kickboxer** | ×1.12 | ×0.97 | ×1.00 | ×0.95 | Long legs, big damage, slower recovery |
-| **Brawler** | ×1.23 | ×0.95 | ×1.04 | ×1.15 | Hits like a truck, guards like a screen door |
-| **Duelist** | ×0.98 | ×1.00 | ×0.90 | ×1.00 | Balanced, patient, punishes everything |
+| **Boxer** | ×0.97 | ×1.06 | ×0.896 | ×1.10 | Lives in punch range, tight guard |
+| **Kickboxer** | ×1.12 | ×0.97 | ×1.044 | ×0.95 | Long legs, big damage, slower recovery |
+| **Brawler** | ×1.23 | ×0.95 | ×1.002 | ×1.15 | Hits like a truck, guards like a screen door |
+| **Duelist** | ×0.98 | ×1.00 | ×0.930 | ×1.00 | Balanced, patient, punishes everything |
 
 Those numbers are not guesses — they were tuned against the simulator. `npm run balance`
 runs the full round robin across five seeds and reports the mean, because a single round
 robin has a standard deviation of several points and will happily tell you a balanced
 roster is broken:
 
-```
-$ npm run balance
+The roster sits inside two points of even (see the report at the top of this README).
+Getting there was not guesswork — the harness caught a real problem on its first run: the
+Duelist had the best damage reduction in the game with no drawback to pay for it, and was
+winning 56% of an 1800-match round robin. `defenseMul` turned out to be worth about three
+percentage points of win rate per 0.01, which is enough of a model to converge in two or
+three measured passes.
 
-  Balance across 5 seeds x 60 matches per pairing (1800 matches, 42s)
+Individual matchups are *not* even, and deliberately so — the Kickboxer beats the Boxer
+about 57–43 head to head while sitting slightly below even overall. Rock-paper-scissors
+between archetypes is the interesting part; a flat 50% everywhere would mean the
+archetypes did not matter.
 
-    archetype      mean     sd   worst    best   under <-- 50% --> over
-    Brawler       51.6%   4.1%   45.6%   55.6%   ...............|#.............
-    Kickboxer     50.5%   1.5%   47.8%   52.2%   ...............#..............
-    Duelist       50.0%   1.8%   47.2%   52.8%   ...............#..............
-    Boxer         48.0%   2.0%   45.6%   51.1%   .............#.|..............
-
-  worst deviation from even: 2.0 points
-  BALANCED — within 4 points
-```
-
-The first pass through this harness caught a real problem: the Duelist had the best
-damage reduction in the game and no drawback to pay for it, and was winning 56% of a
-1800-match round robin. It took one measured iteration to bring the whole roster inside
-two points of even. You can try a candidate tuning without editing anything:
+You can try a candidate tuning without editing anything:
 
 ```bash
 node src/sim/balance.mjs 60 veteran '{"duelist":{"defenseMul":0.85}}'
@@ -158,9 +168,11 @@ right, punishes a whiff, respects spacing, or throws something out for no reason
 The ladder is monotonic, and measurably so — 200 matches of Rookie vs Master:
 
 ```
-Rookie  █░░░░░░░░░░░░░░░░░░░   5.0%    129.1 dmg/match   42% accuracy
-Master  ███████████████████░  95.0%    230.5 dmg/match   56% accuracy
+Rookie  █░░░░░░░░░░░░░░░░░░░   5.3%    128.5 dmg/match   41% accuracy
+Master  ███████████████████░  94.7%    228.7 dmg/match   61% accuracy
 ```
+
+It holds in the middle of the ladder too — Contender loses to Veteran 38–62.
 
 ## The simulation lab
 
@@ -179,6 +191,7 @@ node src/sim/cli.mjs match 42 boxer brawler veteran   # one fight, blow by blow
 node src/sim/cli.mjs batch 200 boxer kickboxer veteran master
 node src/sim/cli.mjs tournament 40 veteran            # every archetype vs every other
 node src/sim/balance.mjs 60 veteran                  # multi-seed balance report
+node src/sim/reach.mjs                               # measured hitbox reach per move
 ```
 
 ```
@@ -207,7 +220,7 @@ thousand times.
 ## Tests
 
 ```bash
-npm test        # 41 tests, no browser required
+npm test        # 46 tests, no browser required
 ```
 
 They cover the frame-data table, pose blending, the IK solver (bone lengths preserved,
@@ -215,7 +228,9 @@ unreachable targets clamped rather than exploding), guard-height rules, the parr
 window — including a regression test for a free-parry exploit found during development —
 guard breaks, combo scaling, knockdown and wake-up, ragdoll stability, arena bounds,
 match termination, seed determinism, the batch report's internal consistency, and a wide
-guard rail on roster balance.
+guard rail on roster balance. Two of them exist because the bug they describe was real:
+holding guard used to re-arm the parry window every hit, and the reach table used to
+promise 30 units more than the skeleton could deliver.
 
 ## Layout
 
@@ -229,7 +244,8 @@ src/
              ragdoll.js                     verlet ragdoll
              ai.js                          the CPU opponent
              match.js                       rounds, hit resolution, stats
-  sim/       batch.js, cli.mjs, balance.mjs  headless simulation and tuning
+  sim/       batch.js, cli.mjs               headless simulation
+             balance.mjs, reach.mjs          tuning and measurement tools
   render/    camera.js, particles.js, renderer.js, hud.js
   audio/     sfx.js                         procedural WebAudio, zero assets
   input/     input.js                       keyboard + gamepad

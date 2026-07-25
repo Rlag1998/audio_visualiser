@@ -28,6 +28,8 @@ function snapshot(f, out) {
   out.mActive = f.mActive;
   out.mTotal = f.mTotal;
   out.meter = f.meter;
+  out.invuln = f.invuln;
+  out.blockstun = f.state === STATE.BLOCKSTUN;
   return out;
 }
 
@@ -44,7 +46,7 @@ function isRecovering(snap) {
 const blankSnap = () => ({
   x: 0, y: 0, state: STATE.IDLE, grounded: true, health: 100, isDown: false,
   blockCrouch: false, moveId: null, height: null, moveFrame: 0,
-  mStartup: 0, mActive: 0, mTotal: 0, meter: 0,
+  mStartup: 0, mActive: 0, mTotal: 0, meter: 0, invuln: 0, blockstun: false,
 });
 
 export class AIController {
@@ -69,9 +71,44 @@ export class AIController {
     this.blockCrouch = false;
     this.blockHold = 0;
     this.parryNow = false;
+    // Two separate books: what the opponent guards (drives our offence) and
+    // what keeps hitting us (drives our guard). Lows are too fast to react to
+    // at any reaction time, so the only way to defend them is to notice you
+    // keep eating them and start crouching — which is what a human does too.
     this.memory = { blockedHigh: 0, blockedLow: 0 };
+    this.hurtBy = { low: 1, high: 1 };
+    this._wasHurt = false;
+    this._sawBlock = false;
     this.lastAttack = null;
     this.attackCooldown = 0;
+  }
+
+  /**
+   * Called by the match between rounds. Without this the perception buffer
+   * still holds last round's final positions, and the AI spends its whole
+   * reaction window at the start of a new round acting on where the opponent
+   * used to be lying.
+   */
+  reset() {
+    for (const snap of this.history) Object.assign(snap, blankSnap());
+    this.cursor = 0;
+    this.hold = 0;
+    this.blockHold = 0;
+    this.attackCooldown = 0;
+    this.plan = 'neutral';
+    this.parryNow = false;
+    this.hurtBy.low = 1;
+    this.hurtBy.high = 1;
+    this._wasHurt = false;
+    this._sawBlock = false;
+  }
+
+  /** How often this AI should guess "crouch" when it cannot read the attack. */
+  get crouchBias() {
+    const total = this.hurtBy.low + this.hurtBy.high;
+    // Pulled toward an even guess by skill: a Rookie barely adapts at all.
+    const observed = this.hurtBy.low / total;
+    return 0.35 + (observed - 0.5) * this.skill.blockSkill * 1.3;
   }
 
   /** Opponent state as this AI perceives it — `reaction` frames in the past. */
@@ -100,10 +137,21 @@ export class AIController {
     const gap = Math.abs(seen.x - self.x);
 
     // Remember what the opponent guards so the AI can start mixing them up.
-    if (foe.state === STATE.BLOCKSTUN) {
-      if (foe.blockCrouch) this.memory.blockedLow++;
+    // Counted on the transition into blockstun, not every frame of it, and read
+    // from the perceived snapshot so the AI is not quietly cheating.
+    if (seen.blockstun && !this._sawBlock) {
+      if (seen.blockCrouch) this.memory.blockedLow++;
       else this.memory.blockedHigh++;
     }
+    this._sawBlock = seen.blockstun;
+
+    // Remember what is getting through our own guard.
+    const hurtNow = self.state === STATE.HURT;
+    if (hurtNow && !this._wasHurt) {
+      if (self.hurtLow) this.hurtBy.low++;
+      else this.hurtBy.high++;
+    }
+    this._wasHurt = hurtNow;
 
     // --- continue a combo -----------------------------------------------------
     if (self.state === STATE.ATTACK && self.canCancel) {
@@ -122,6 +170,7 @@ export class AIController {
 
     // A committed guard: once the AI decides to block it holds through the
     // attack instead of flickering the button on and off every frame.
+    if (this.blockHold > 0 && self.exhausted) this.blockHold = 0;
     if (this.blockHold > 0) {
       this.blockHold--;
       cmd.block = true;
@@ -134,9 +183,19 @@ export class AIController {
     if (seen.isDown) {
       if (gap > 62) cmd.x = toFoe;
       else if (gap < 40) cmd.x = -toFoe;
-      if (foe.state === STATE.IDLE && foe.invuln > 0 && rng.chance(skill.punishSkill * 0.12)) {
+      if (seen.state === STATE.IDLE && seen.invuln > 0 && rng.chance(skill.punishSkill * 0.12)) {
         const m = this._pickAttack(self, seen, gap, false);
         if (m) cmd.attack = m;
+      }
+      return;
+    }
+
+    // --- our own jump-in -------------------------------------------------------
+    if (!self.grounded) {
+      if (gap < MOVE_REACH.airKick && self.canAttack('airKick') && rng.chance(0.2 + skill.aggression * 0.35)) {
+        cmd.attack = 'airKick';
+      } else if (gap > 40) {
+        cmd.x = toFoe;
       }
       return;
     }
@@ -160,7 +219,7 @@ export class AIController {
         // Guessing the height right is a separate, harder check — that is the
         // mixup game. High skill AI reads it, low skill AI eats sweeps.
         const readHeight = rng.chance(0.45 + skill.blockSkill * 0.5);
-        this.blockCrouch = readHeight ? seen.height === 'low' : rng.chance(0.4);
+        this.blockCrouch = readHeight ? seen.height === 'low' : rng.chance(this.crouchBias);
         this.parryNow = rng.chance(skill.parrySkill);
         this.blockHold = rng.int(7, 15);
         cmd.block = true;
@@ -181,7 +240,7 @@ export class AIController {
       !isRecovering(seen) && gap < 92 && this.attackCooldown <= 0 &&
       rng.chance(skill.blockSkill * 0.09)
     ) {
-      this.blockCrouch = rng.chance(0.34);
+      this.blockCrouch = rng.chance(this.crouchBias);
       this.parryNow = rng.chance(skill.parrySkill * 0.5);
       this.blockHold = rng.int(8, 20);
       cmd.block = true;
@@ -259,7 +318,10 @@ export class AIController {
       }
       // Occasional deliberate mistake: a raw move from too far out.
       if (rng.chance(this.skill.mistake * 0.02)) {
-        const m = this._pickAttack(self, seen, gap + 40, false);
+        // Deliberately ignore range: this is the AI throwing something it has
+        // no business throwing. Passing a larger gap would filter *more* moves
+        // out, which is the opposite of a mistake.
+        const m = this._pickAttack(self, seen, 0, false);
         if (m) {
           cmd.attack = m;
           this.attackCooldown = 8;
@@ -291,7 +353,7 @@ export class AIController {
       // Too close to breathe — back out or hold guard.
       this.plan = r < 0.55 ? 'retreat' : 'turtle';
       this.planDir = -toFoe;
-      this.blockCrouch = rng.chance(0.35);
+      this.blockCrouch = rng.chance(this.crouchBias);
       this.hold = rng.int(8, 18);
       return;
     }
@@ -306,7 +368,7 @@ export class AIController {
       this.planDir = -toFoe;
     } else if (r < press * 0.6 + 0.34) {
       this.plan = 'turtle';
-      this.blockCrouch = rng.chance(0.4);
+      this.blockCrouch = rng.chance(this.crouchBias);
     } else {
       this.plan = 'neutral';
     }

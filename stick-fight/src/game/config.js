@@ -22,8 +22,9 @@ export const BODY = {
   foreArm: 25,
   thigh: 34,
   shin: 34,
-  /** Half-width used for body-vs-body pushing. */
-  bodyR: 15,
+  /** Half-width used for body-vs-body pushing. Wide enough that two fighters
+   *  in the pocket stay visually distinct rather than merging into one blob. */
+  bodyR: 19,
 };
 
 export const PHYS = {
@@ -105,7 +106,7 @@ export const ARCHETYPES = {
     blurb: 'Fast hands, tight guard, lives in punch range.',
     damageMul: 0.97,
     speedMul: 1.06,
-    defenseMul: 0.93,
+    defenseMul: 0.896,
     staminaMul: 1.1,
     weights: { jab: 3.2, cross: 2.4, hook: 1.8, uppercut: 1.4, lowKick: 0.5, highKick: 0.3, sweep: 0.4 },
   },
@@ -114,7 +115,7 @@ export const ARCHETYPES = {
     blurb: 'Long legs, big damage, slower to recover.',
     damageMul: 1.12,
     speedMul: 0.97,
-    defenseMul: 1.0,
+    defenseMul: 1.044,
     staminaMul: 0.95,
     weights: { jab: 1.4, cross: 1.2, hook: 0.9, uppercut: 0.7, lowKick: 2.6, highKick: 2.2, sweep: 1.5 },
   },
@@ -123,7 +124,7 @@ export const ARCHETYPES = {
     blurb: 'Hits like a truck, guards like a screen door.',
     damageMul: 1.23,
     speedMul: 0.95,
-    defenseMul: 1.04, // takes MORE damage
+    defenseMul: 1.002, // takes MORE damage
     staminaMul: 1.15,
     weights: { jab: 1.1, cross: 2.0, hook: 2.8, uppercut: 2.2, lowKick: 1.0, highKick: 0.8, sweep: 0.9 },
   },
@@ -132,7 +133,7 @@ export const ARCHETYPES = {
     blurb: 'Balanced, patient, punishes everything.',
     damageMul: 0.98,
     speedMul: 1.0,
-    defenseMul: 0.90,
+    defenseMul: 0.930,
     staminaMul: 1.0,
     weights: { jab: 1.8, cross: 1.6, hook: 1.3, uppercut: 1.2, lowKick: 1.6, highKick: 1.2, sweep: 1.2 },
   },

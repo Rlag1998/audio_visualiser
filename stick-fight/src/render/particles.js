@@ -36,18 +36,32 @@ export class Particles {
   }
 
   _spawn() {
+    let slot = null;
     for (let i = 0; i < MAX; i++) {
       const p = this.pool[(this.cursor + i) % MAX];
       if (!p.alive) {
         this.cursor = (this.cursor + i + 1) % MAX;
-        p.alive = true;
-        return p;
+        slot = p;
+        break;
       }
     }
-    // Everything is busy: steal the oldest slot rather than dropping the effect.
-    const p = this.pool[this.cursor];
-    this.cursor = (this.cursor + 1) % MAX;
-    return p;
+    if (!slot) {
+      // Everything is busy: steal the oldest slot rather than drop the effect.
+      slot = this.pool[this.cursor];
+      this.cursor = (this.cursor + 1) % MAX;
+    }
+    // Reset to defaults. Emitters only set the fields they care about, so a
+    // recycled slot would otherwise inherit the last particle's motion — which
+    // is how a shockwave ring ends up falling out of frame instead of expanding.
+    slot.alive = true;
+    slot.vx = 0;
+    slot.vy = 0;
+    slot.rot = 0;
+    slot.spin = 0;
+    slot.size = 1;
+    slot.gravity = 0;
+    slot.drag = 0;
+    return slot;
   }
 
   clear() {

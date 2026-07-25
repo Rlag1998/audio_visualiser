@@ -173,9 +173,15 @@ export class Renderer {
 
     this._drawFloor(ctx);
 
-    for (const f of match.fighters) this._drawShadow(ctx, f);
-    for (const f of match.fighters) this._drawReflection(ctx, f, dt);
-    for (const f of match.fighters) this._drawFighter(ctx, f, dt);
+    // Whoever is swinging gets drawn on top. In the pocket the two figures
+    // overlap heavily, and the attack is the thing the player needs to read.
+    const order = a.isAttacking === b.isAttacking
+      ? match.fighters
+      : a.isAttacking ? [b, a] : [a, b];
+
+    for (const f of order) this._drawShadow(ctx, f);
+    for (const f of order) this._drawReflection(ctx, f, dt);
+    for (const f of order) this._drawFighter(ctx, f, dt);
 
     this.particles.draw(ctx);
     if (this.showDebug) this._drawDebug(ctx, match);

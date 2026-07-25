@@ -49,13 +49,26 @@ export const CONTROL_HELP = [
 
 const DOUBLE_TAP_MS = 260;
 
+/**
+ * Every key either layout binds, derived rather than hand-listed — a hardcoded
+ * list drifts, and a missed binding means the browser keeps its default. `/`
+ * opening Firefox's quick-find mid-fight is the sort of thing that causes.
+ */
+const GAME_KEYS = new Set(
+  Object.values(LAYOUTS).flatMap((layout) =>
+    Object.values(layout).filter(Array.isArray).flat(),
+  ),
+);
+
 export class Keyboard {
   constructor(target = globalThis) {
     this.down = new Set();
     this.pressed = new Set(); // edge-triggered, cleared each consume
     this.lastTap = new Map();
     this.doubleTap = new Map();
-    this.enabled = true;
+    // Off by default: while a menu is up the game must not swallow Space,
+    // arrows or `/`, or the panels stop being keyboard-operable.
+    this.enabled = false;
 
     this._onDown = (e) => {
       if (!this.enabled) return;
@@ -85,11 +98,7 @@ export class Keyboard {
   }
 
   _isGameKey(code) {
-    return (
-      code.startsWith('Arrow') || code === 'Space' ||
-      ['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyJ', 'KeyK', 'KeyL', 'KeyI', 'KeyU'].includes(code) ||
-      code.startsWith('Numpad')
-    );
+    return GAME_KEYS.has(code);
   }
 
   isDown(codes) {
@@ -115,6 +124,15 @@ export class Keyboard {
 
   endFrame() {
     this.pressed.clear();
+  }
+
+  /** Enable only while a fight is actually taking input. */
+  setEnabled(on) {
+    if (this.enabled === on) return;
+    this.enabled = on;
+    this.down.clear();
+    this.pressed.clear();
+    this.doubleTap.clear();
   }
 
   destroy() {

@@ -71,6 +71,8 @@ function showScreen(name) {
   dom.boot.classList.add('hidden');
   dom.overlay.classList.toggle('hidden', name === 'game');
   dom.hint.classList.toggle('hidden', name !== 'game');
+  // Menus need Space, the arrows and `/` for their own controls.
+  keyboard.setEnabled(name === 'game');
 }
 
 function controllerFor(side) {
@@ -196,6 +198,15 @@ function frame(now) {
       if (!running) break;
     }
     if (accumulator > TICK * 6) accumulator = 0; // recover from a long stall
+
+    // Only retire edge-triggered presses once a tick has actually consumed
+    // them. On a 144Hz display most animation frames run zero ticks, and
+    // clearing here unconditionally would silently swallow more than half of
+    // every player's attacks.
+    if (steps > 0) keyboard.endFrame();
+  } else {
+    // Nothing is simulating — drop whatever was pressed rather than letting it
+    // pile up and fire as a burst on the first tick after resuming.
     keyboard.endFrame();
   }
 
