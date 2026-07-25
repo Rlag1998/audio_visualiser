@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="description" content="A stick figure fighting game with frame-data combat, ragdoll physics and a headless balance simulator." />
+<meta name="theme-color" content="#05070e" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Stick Fight — Combat Simulator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0f1c'/%3E%3Cg stroke='%235ee7ff' stroke-width='2.6' stroke-linecap='round' fill='none'%3E%3Ccircle cx='13' cy='9' r='3' fill='%235ee7ff' stroke='none'/%3E%3Cpath d='M13 12v8M13 15l7-2M13 15l-5 3M13 20l-4 6M13 20l5 5'/%3E%3C/g%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #05070e;
+    --panel: rgba(14, 19, 33, 0.86);
+    --panel-edge: rgba(120, 160, 255, 0.18);
+    --ink: #e8eefc;
+    --muted: #94a3c4;
+    --accent: #5ee7ff;
+    --accent-2: #ffd166;
+    --danger: #ff6b8a;
+    --radius: 14px;
+    --font: "Segoe UI", Roboto, -apple-system, system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 100vh lies on mobile browsers with a collapsing address bar; dvh does not. */
+  #app { position: relative; width: 100vw; height: 100vh; height: 100dvh; }
+
+  #stage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #05070e;
+    touch-action: none;
+  }
+
+  /* ---------------------------------------------------------- overlay shell */
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    overflow: auto;
+    background: radial-gradient(120% 90% at 50% 20%, rgba(8, 12, 24, 0.55), rgba(3, 5, 11, 0.92));
+    backdrop-filter: blur(3px);
+  }
+
+  #overlay.hidden, .hidden { display: none !important; }
+
+  .panel {
+    width: min(980px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow: auto;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: var(--radius);
+    padding: 26px 28px 24px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  }
+
+  .panel::-webkit-scrollbar { width: 10px; }
+  .panel::-webkit-scrollbar-thumb { background: rgba(120,160,255,0.25); border-radius: 8px; }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(30px, 5vw, 46px);
+    letter-spacing: 0.16em;
+    font-weight: 900;
+    background: linear-gradient(100deg, var(--accent), #fff 45%, var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .tagline { margin: 6px 0 22px; color: var(--muted); font-size: 14px; letter-spacing: 0.04em; }
+
+  h2 {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 22px 0 10px;
+    font-weight: 700;
+  }
+  h2:first-of-type { margin-top: 0; }
+
+  /* ------------------------------------------------------------- selectors */
+
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .chip {
+    appearance: none;
+    border: 1px solid rgba(140, 170, 255, 0.22);
+    background: rgba(255, 255, 255, 0.035);
+    color: var(--ink);
+    border-radius: 10px;
+    padding: 9px 14px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .14s, border-color .14s, transform .1s;
+  }
+  .chip:hover { background: rgba(94, 231, 255, 0.12); border-color: rgba(94, 231, 255, 0.45); }
+  .chip:active { transform: translateY(1px); }
+  .chip[aria-pressed="true"] {
+    background: linear-gradient(180deg, rgba(94, 231, 255, 0.26), rgba(94, 231, 255, 0.10));
+    border-color: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 0 1px rgba(94, 231, 255, 0.25) inset;
+  }
+  .chip:disabled { opacity: .38; cursor: not-allowed; }
+
+  .card {
+    border: 1px solid rgba(140, 170, 255, 0.16);
+    border-radius: 12px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .fighter-card { display: grid; gap: 10px; }
+  .fighter-head { display: flex; align-items: center; gap: 10px; }
+  .swatch { width: 16px; height: 16px; border-radius: 5px; box-shadow: 0 0 12px currentColor; }
+  .fighter-head strong { font-size: 14px; letter-spacing: .08em; }
+  .side-tag { margin-left: auto; font-size: 11px; color: var(--muted); letter-spacing: .12em; }
+  .blurb { color: var(--muted); font-size: 12.5px; min-height: 2.4em; line-height: 1.45; }
+
+  label.field { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+  select, input[type="number"], input[type="text"] {
+    background: rgba(6, 10, 20, 0.85);
+    border: 1px solid rgba(140, 170, 255, 0.22);
+    color: var(--ink);
+    border-radius: 9px;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 13px;
+  }
+  input[type="range"] { accent-color: var(--accent); }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; align-items: center; }
+
+  .primary {
+    flex: 1 1 220px;
+    border: none;
+    border-radius: 11px;
+    padding: 14px 22px;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    color: #04121a;
+    background: linear-gradient(100deg, var(--accent), #a5f3fc 55%, var(--accent-2));
+    cursor: pointer;
+    box-shadow: 0 10px 30px rgba(94, 231, 255, 0.22);
+  }
+  .primary:hover { filter: brightness(1.08); }
+  .primary:active { transform: translateY(1px); }
+
+  /* ------------------------------------------------------------------ lab */
+
+  .lab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+
+  .progress {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 14px 0 6px;
+  }
+  .progress > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .1s linear; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: var(--mono); }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid rgba(140, 170, 255, 0.10); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  tbody tr:hover { background: rgba(94, 231, 255, 0.05); }
+
+  .winbar { display: grid; grid-template-columns: 130px 1fr 62px; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
+  .winbar .meter { height: 14px; background: rgba(255,255,255,0.07); border-radius: 7px; overflow: hidden; }
+  .winbar .meter > div { height: 100%; border-radius: 7px; }
+  .winbar .val { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+
+  .note { color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .kbd {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(140,170,255,0.22);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+
+  /* --------------------------------------------------------------- in-game */
+
+  #hint {
+    position: absolute;
+    left: 0; right: 0; bottom: 12px;
+    text-align: center;
+    color: rgba(200, 214, 245, 0.5);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    text-shadow: 0 2px 8px rgba(0,0,0,.9);
+  }
+
+  /* ---------------------------------------------------------- touch controls */
+
+  #touch {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: min(46vh, 260px);
+    pointer-events: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    z-index: 5;
+  }
+  #touch > * { pointer-events: auto; }
+
+  .tc-pad {
+    position: absolute;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    width: 132px;
+    height: 132px;
+    border-radius: 50%;
+    touch-action: none;
+    display: grid;
+    place-items: center;
+  }
+  .tc-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid rgba(150, 190, 255, 0.28);
+    background: radial-gradient(circle at 50% 50%, rgba(94, 231, 255, 0.10), rgba(10, 16, 30, 0.42));
+    backdrop-filter: blur(2px);
+  }
+  .tc-knob {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: rgba(94, 231, 255, 0.34);
+    border: 2px solid rgba(150, 220, 255, 0.6);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+    transition: transform .06s ease-out;
+  }
+  .tc-hint {
+    position: absolute;
+    font-size: 8.5px;
+    letter-spacing: .14em;
+    color: rgba(200, 220, 255, 0.5);
+    pointer-events: none;
+  }
+  .tc-up { top: 8px; }
+  .tc-down { bottom: 8px; }
+
+  .tc-buttons {
+    position: absolute;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: repeat(3, 62px);
+    grid-template-areas:
+      "guard  high   finish"
+      "kick   punch  jab";
+    gap: 9px;
+    touch-action: none;
+  }
+  .tc-btn {
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    border: 2px solid rgba(150, 190, 255, 0.30);
+    background: rgba(14, 22, 40, 0.5);
+    backdrop-filter: blur(2px);
+    color: var(--ink);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: transform .05s, background .08s;
+  }
+  .tc-btn.held { transform: scale(0.92); background: rgba(94, 231, 255, 0.34); }
+  .tc-guard  { grid-area: guard;  border-color: rgba(150, 200, 255, 0.55); }
+  .tc-a      { grid-area: jab; }
+  .tc-b      { grid-area: punch; }
+  .tc-c      { grid-area: kick; }
+  .tc-d      { grid-area: high; }
+  .tc-finisher {
+    grid-area: finish;
+    opacity: .3;
+    border-color: rgba(255, 209, 102, 0.4);
+    color: var(--accent-2);
+  }
+  .tc-finisher.ready {
+    opacity: 1;
+    background: rgba(255, 209, 102, 0.2);
+    border-color: var(--accent-2);
+    box-shadow: 0 0 16px rgba(255, 209, 102, 0.4);
+  }
+
+  /* There is no Esc key on a phone — this is the only way out of a fight. */
+  #pauseBtn {
+    position: absolute;
+    left: 50%;
+    top: 84px;
+    transform: translateX(-50%);
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid rgba(150, 190, 255, 0.35);
+    background: rgba(10, 16, 30, 0.6);
+    backdrop-filter: blur(2px);
+    color: var(--ink);
+    font-size: 11px;
+    letter-spacing: .1em;
+    z-index: 6;
+    touch-action: manipulation;
+  }
+  #pauseBtn:active { background: rgba(94, 231, 255, 0.3); }
+  @media (max-height: 460px) { #pauseBtn { top: 72px; width: 34px; height: 34px; } }
+
+  #rotate {
+    position: absolute;
+    left: 50%;
+    top: 128px;
+    transform: translateX(-50%);
+    background: rgba(10, 16, 30, 0.85);
+    border: 1px solid var(--panel-edge);
+    border-radius: 999px;
+    padding: 7px 15px;
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    color: var(--muted);
+    z-index: 6;
+    pointer-events: none;
+  }
+
+  /* --------------------------------------------------------- small screens */
+
+  @media (max-width: 640px) {
+    .panel { padding: 18px 16px 18px; border-radius: 12px; }
+    h1 { font-size: clamp(24px, 8vw, 34px); letter-spacing: .1em; }
+    .tagline { font-size: 12.5px; margin-bottom: 16px; }
+    h2 { margin: 16px 0 8px; }
+    .grid-2 { gap: 14px; }
+    .lab-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .chip { padding: 8px 11px; font-size: 12.5px; }
+    .primary { padding: 15px 18px; font-size: 14px; flex-basis: 100%; }
+    .blurb { min-height: 0; }
+    table { font-size: 11px; }
+    th, td { padding: 4px 5px; }
+    .winbar { grid-template-columns: 96px 1fr 52px; font-size: 12px; }
+    #hint { font-size: 10px; }
+  }
+
+  /* Short viewports (a phone held sideways) — keep the arena clear of the HUD. */
+  @media (max-height: 460px) {
+    .tc-pad { width: 112px; height: 112px; bottom: max(10px, env(safe-area-inset-bottom)); }
+    .tc-knob { width: 44px; height: 44px; }
+    .tc-buttons { grid-template-columns: repeat(3, 54px); gap: 7px; bottom: max(10px, env(safe-area-inset-bottom)); }
+    .tc-btn { width: 54px; height: 54px; font-size: 9px; }
+    #touch { height: min(52vh, 180px); }
+    .panel { max-height: calc(100vh - 16px); padding: 14px; }
+  }
+
+  #boot {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    padding: 30px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  #boot code { color: var(--accent); font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage" aria-label="Fight arena"></canvas>
+
+  <div id="hint" class="hidden"></div>
+  <div id="touch" class="hidden"></div>
+  <button id="pauseBtn" class="hidden" type="button" aria-label="Pause">❚❚</button>
+  <div id="rotate" class="hidden">Turn your phone sideways for a wider view</div>
+
+  <div id="overlay">
+    <!-- ------------------------------------------------------------ boot -->
+    <div id="boot">
+      <div>
+        <strong style="color:var(--ink);font-size:18px;letter-spacing:.2em">STICK FIGHT</strong><br /><br />
+        Loading the engine&hellip;<br /><br />
+        <span class="note">
+          If this message stays put, the page was opened straight from disk.<br />
+          ES modules need a server — run <code>npm start</code> (or
+          <code>python3 -m http.server 8080</code>) in this folder<br />and open
+          <code>http://localhost:8080/</code>.
+        </span>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------ menu -->
+    <section id="menu" class="panel hidden">
+      <h1>STICK FIGHT</h1>
+      <p class="tagline">A frame-data fighting engine with ragdoll physics — and a lab to prove the balance.</p>
+
+      <h2>Mode</h2>
+      <div class="row" id="modeRow"></div>
+
+      <div class="grid-2" style="margin-top:20px">
+        <div class="card fighter-card" id="cardP1"></div>
+        <div class="card fighter-card" id="cardP2"></div>
+      </div>
+
+      <h2>Match</h2>
+      <div class="lab-grid">
+        <label class="field">Rounds to win
+          <select id="winsNeeded">
+            <option value="1">1 — single round</option>
+            <option value="2" selected>2 — best of 3</option>
+            <option value="3">3 — best of 5</option>
+          </select>
+        </label>
+        <label class="field">Round time
+          <select id="roundTime">
+            <option value="30">30 seconds</option>
+            <option value="60" selected>60 seconds</option>
+            <option value="99">99 seconds</option>
+          </select>
+        </label>
+        <label class="field">Seed
+          <input type="number" id="seed" value="1" min="0" step="1" />
+        </label>
+        <label class="field">Sound
+          <select id="sound">
+            <option value="on" selected>On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label class="field">On-screen controls
+          <select id="touchMode">
+            <option value="auto" selected>Auto</option>
+            <option value="on">Always on</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="fightBtn">FIGHT</button>
+        <button class="chip" id="labBtn">Simulation lab</button>
+        <button class="chip" id="helpBtn">Controls</button>
+        <button class="chip" id="randomSeedBtn">Random seed</button>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------- lab -->
+    <section id="lab" class="panel hidden">
+      <h1 style="font-size:28px">SIMULATION LAB</h1>
+      <p class="tagline">
+        Run the fight headless, thousands of frames at a time, and read the balance off real numbers.
+      </p>
+
+      <h2>Matchup</h2>
+      <div class="lab-grid">
+        <label class="field">Fighter A<select id="labArchA"></select></label>
+        <label class="field">A difficulty<select id="labDiffA"></select></label>
+        <label class="field">Fighter B<select id="labArchB"></select></label>
+        <label class="field">B difficulty<select id="labDiffB"></select></label>
+        <label class="field">Matches<select id="labCount">
+          <option value="25">25</option>
+          <option value="100" selected>100</option>
+          <option value="400">400</option>
+          <option value="1000">1000</option>
+        </select></label>
+        <label class="field">Seed<input type="number" id="labSeed" value="12345" min="0" step="1" /></label>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="runBatchBtn">RUN BATCH</button>
+        <button class="chip" id="runTourneyBtn">Round robin — every archetype</button>
+        <button class="chip" id="labBackBtn">Back</button>
+      </div>
+
+      <div class="progress"><div id="labProgress"></div></div>
+      <div id="labStatus" class="note">Idle.</div>
+      <div id="labResults" style="margin-top:16px"></div>
+    </section>
+
+    <!-- ------------------------------------------------------------ help -->
+    <section id="help" class="panel hidden">
+      <h1 style="font-size:28px">CONTROLS</h1>
+      <p class="tagline">Two players, one keyboard. Gamepads are picked up automatically if plugged in.</p>
+      <table id="controlTable"></table>
+
+      <h2>On a phone</h2>
+      <ul class="note" style="line-height:1.85">
+        <li><strong>Left stick:</strong> slide to move, push up to jump, down to crouch. Double-tap left or right to dash.</li>
+        <li><strong>Right buttons:</strong> jab, punch, kick, high kick, and a held guard. Crouch while pressing punch for an uppercut, or kick for a sweep.</li>
+        <li><strong>FINISH</strong> lights up once the meter is full. The <strong>❚❚</strong> button at the top pauses.</li>
+        <li>Landscape gives the fight more room, but portrait is framed for it too.</li>
+      </ul>
+
+      <h2>Rules that matter</h2>
+      <ul class="note" style="line-height:1.85">
+        <li><strong>Guard height:</strong> standing guard stops highs and mids, crouching guard stops lows and mids. Sweeps and low kicks go under a standing guard; high kicks sail over a crouching one.</li>
+        <li><strong>Parry:</strong> a guard pressed within 6 frames of the hit reflects it and stuns the attacker. Holding guard does not re-arm it — you have to time the press.</li>
+        <li><strong>Guard meter:</strong> blocking chips it away. Empty it and the guard breaks, leaving you stunned for most of a second.</li>
+        <li><strong>Counters:</strong> hitting someone during their startup or recovery frames does 35% extra.</li>
+        <li><strong>Combos:</strong> landing a hit lets you cancel the recovery into another move, up to four deep. Each extra hit scales the damage down.</li>
+        <li><strong>Stamina:</strong> every attack costs it. Run out and you cannot attack or guard until you recover.</li>
+        <li><strong>Finisher:</strong> fills from damage dealt and taken. It breaks guards outright and cannot be parried.</li>
+      </ul>
+
+      <div class="actions">
+        <button class="primary" id="helpBackBtn">BACK</button>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------- pause -->
+    <section id="pause" class="panel hidden" style="width:min(520px,100%)">
+      <h1 style="font-size:26px" id="pauseTitle">PAUSED</h1>
+      <p class="tagline" id="pauseSub">The fight is on hold.</p>
+      <div id="pauseStats" class="note"></div>
+      <div class="actions">
+        <button class="primary" id="resumeBtn">RESUME</button>
+        <button class="chip" id="rematchBtn">Rematch</button>
+        <button class="chip" id="menuBtn">Main menu</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
