@@ -1,0 +1,23 @@
+{
+  "name": "stick-fight",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A stick figure combat simulator: frame-data fighting engine, ragdoll physics, CPU opponents and a headless batch simulator.",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "serve": "npx --yes serve -l 8080 .",
+    "test": "node --test \"test/*.test.mjs\"",
+    "sim": "node src/sim/cli.mjs",
+    "tournament": "node src/sim/cli.mjs tournament 30",
+    "balance": "node src/sim/balance.mjs 60 veteran"
+  },
+  "keywords": [
+    "fighting-game",
+    "canvas",
+    "simulation",
+    "ragdoll",
+    "game-ai"
+  ],
+  "license": "MIT"
+}
