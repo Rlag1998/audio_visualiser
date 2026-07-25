@@ -11,6 +11,7 @@ import { Renderer } from './render/renderer.js';
 import { Hud } from './render/hud.js';
 import { Sfx } from './audio/sfx.js';
 import { Keyboard, HumanController } from './input/input.js';
+import { TouchControls, prefersTouchControls } from './input/touch.js';
 import { BatchRunner, RoundRobinRunner, roundRobin } from './sim/batch.js';
 import { makeRng, randomSeed } from './core/rng.js';
 import {
@@ -29,6 +30,9 @@ const dom = {
   help: $('help'),
   pause: $('pause'),
   hint: $('hint'),
+  touch: $('touch'),
+  rotate: $('rotate'),
+  pauseBtn: $('pauseBtn'),
 };
 
 const settings = {
@@ -41,12 +45,21 @@ const settings = {
   roundTime: 60,
   seed: 1,
   sound: true,
+  touchMode: 'auto',
 };
 
 const renderer = new Renderer(dom.stage);
 const hud = new Hud();
 const sfx = new Sfx();
 const keyboard = new Keyboard(window);
+const touch = new TouchControls(dom.touch, keyboard);
+
+/** On-screen controls follow the setting, defaulting to "whatever this device is". */
+function touchWanted() {
+  if (settings.touchMode === 'on') return true;
+  if (settings.touchMode === 'off') return false;
+  return prefersTouchControls();
+}
 
 let match = null;
 let running = false;
@@ -73,6 +86,20 @@ function showScreen(name) {
   dom.hint.classList.toggle('hidden', name !== 'game');
   // Menus need Space, the arrows and `/` for their own controls.
   keyboard.setEnabled(name === 'game');
+  touch.setVisible(name === 'game' && touchWanted());
+  dom.pauseBtn.classList.toggle('hidden', !(name === 'game' && touchWanted()));
+  updateRotateHint();
+}
+
+/** Nudge phone players into landscape, where the arena has more room. */
+let rotateTimer = 0;
+function updateRotateHint() {
+  const show = screen === 'game' && touchWanted() &&
+    window.innerHeight > window.innerWidth && window.innerWidth < 620;
+  dom.rotate.classList.toggle('hidden', !show);
+  clearTimeout(rotateTimer);
+  // It is a suggestion, not a warning — say it once and get out of the way.
+  if (show) rotateTimer = setTimeout(() => dom.rotate.classList.add('hidden'), 5000);
 }
 
 function controllerFor(side) {
@@ -99,6 +126,7 @@ function startMatch() {
   settings.winsNeeded = Number($('winsNeeded').value);
   settings.roundTime = Number($('roundTime').value);
   settings.sound = $('sound').value === 'on';
+  settings.touchMode = $('touchMode').value;
   sfx.setEnabled(settings.sound);
 
   match = new Match({
@@ -135,6 +163,11 @@ function nameFor(side) {
 
 function updateHint() {
   const training = settings.mode === 'training';
+  if (touchWanted()) {
+    // None of the keyboard shortcuts exist on a phone; the pause button does.
+    dom.hint.textContent = training ? 'TRAINING' : '';
+    return;
+  }
   dom.hint.textContent = training
     ? 'TRAINING — R resets · ESC menu · F2 hitboxes'
     : 'ESC pause · R rematch · F2 hitboxes';
@@ -211,6 +244,7 @@ function frame(now) {
   }
 
   if (match) {
+    if (touch.active) touch.syncMeter(match.p1.meter >= 100);
     renderer.draw(match, raw);
     const ctx = renderer.ctx;
     ctx.save();
@@ -318,6 +352,29 @@ function runTournamentUi() {
 
 // -------------------------------------------------------------------- wiring
 
+/** Escape, and the on-screen pause button, both land here. */
+function togglePause() {
+  if (screen === 'game') {
+    touch.releaseAll();
+    paused = true;
+    $('pauseTitle').textContent = 'PAUSED';
+    $('pauseSub').textContent = 'The fight is on hold.';
+    $('pauseStats').innerHTML = match ? statsTable() : '';
+    $('resumeBtn').textContent = 'RESUME';
+    showScreen('pause');
+  } else if (screen === 'pause') {
+    if (running) {
+      paused = false;
+      showScreen('game');
+    } else {
+      showScreen('menu');
+    }
+  } else if (screen !== 'menu') {
+    stopLab();
+    showScreen('menu');
+  }
+}
+
 function wire() {
   refreshMenu();
   renderControls($('controlTable'));
@@ -363,27 +420,16 @@ function wire() {
     showScreen('menu');
   });
 
-  window.addEventListener('resize', () => renderer.resize());
+  const onResize = () => {
+    renderer.resize();
+    updateRotateHint();
+  };
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', () => setTimeout(onResize, 250));
+  dom.pauseBtn.addEventListener('click', togglePause);
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
-      if (screen === 'game') {
-        paused = true;
-        $('pauseTitle').textContent = 'PAUSED';
-        $('pauseSub').textContent = 'The fight is on hold.';
-        $('pauseStats').innerHTML = match ? statsTable() : '';
-        $('resumeBtn').textContent = 'RESUME';
-        showScreen('pause');
-      } else if (screen === 'pause') {
-        if (running) {
-          paused = false;
-          showScreen('game');
-        } else {
-          showScreen('menu');
-        }
-      } else if (screen !== 'menu') {
-        stopLab();
-        showScreen('menu');
-      }
+      togglePause();
       e.preventDefault();
     } else if (e.code === 'KeyR' && (screen === 'game' || screen === 'pause') && match) {
       startMatch();
@@ -398,6 +444,7 @@ function wire() {
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 
+  renderer.reducedFx = prefersTouchControls();
   showScreen('menu');
   renderer.resize();
   requestAnimationFrame((t) => {

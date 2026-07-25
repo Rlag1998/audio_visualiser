@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="description" content="A stick figure fighting game with frame-data combat, ragdoll physics and a headless balance simulator." />
+<meta name="theme-color" content="#05070e" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>Stick Fight — Combat Simulator</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0f1c'/%3E%3Cg stroke='%235ee7ff' stroke-width='2.6' stroke-linecap='round' fill='none'%3E%3Ccircle cx='13' cy='9' r='3' fill='%235ee7ff' stroke='none'/%3E%3Cpath d='M13 12v8M13 15l7-2M13 15l-5 3M13 20l-4 6M13 20l5 5'/%3E%3C/g%3E%3C/svg%3E" />
 <style>
@@ -30,9 +35,12 @@
     font-family: var(--font);
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  #app { position: relative; width: 100vw; height: 100vh; }
+  /* 100vh lies on mobile browsers with a collapsing address bar; dvh does not. */
+  #app { position: relative; width: 100vw; height: 100vh; height: 100dvh; }
 
   #stage {
     position: absolute;
@@ -41,6 +49,7 @@
     height: 100%;
     display: block;
     background: #05070e;
+    touch-action: none;
   }
 
   /* ---------------------------------------------------------- overlay shell */
@@ -218,6 +227,172 @@
     text-shadow: 0 2px 8px rgba(0,0,0,.9);
   }
 
+  /* ---------------------------------------------------------- touch controls */
+
+  #touch {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: min(46vh, 260px);
+    pointer-events: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    z-index: 5;
+  }
+  #touch > * { pointer-events: auto; }
+
+  .tc-pad {
+    position: absolute;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    width: 132px;
+    height: 132px;
+    border-radius: 50%;
+    touch-action: none;
+    display: grid;
+    place-items: center;
+  }
+  .tc-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid rgba(150, 190, 255, 0.28);
+    background: radial-gradient(circle at 50% 50%, rgba(94, 231, 255, 0.10), rgba(10, 16, 30, 0.42));
+    backdrop-filter: blur(2px);
+  }
+  .tc-knob {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: rgba(94, 231, 255, 0.34);
+    border: 2px solid rgba(150, 220, 255, 0.6);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+    transition: transform .06s ease-out;
+  }
+  .tc-hint {
+    position: absolute;
+    font-size: 8.5px;
+    letter-spacing: .14em;
+    color: rgba(200, 220, 255, 0.5);
+    pointer-events: none;
+  }
+  .tc-up { top: 8px; }
+  .tc-down { bottom: 8px; }
+
+  .tc-buttons {
+    position: absolute;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: repeat(3, 62px);
+    grid-template-areas:
+      "guard  high   finish"
+      "kick   punch  jab";
+    gap: 9px;
+    touch-action: none;
+  }
+  .tc-btn {
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    border: 2px solid rgba(150, 190, 255, 0.30);
+    background: rgba(14, 22, 40, 0.5);
+    backdrop-filter: blur(2px);
+    color: var(--ink);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: transform .05s, background .08s;
+  }
+  .tc-btn.held { transform: scale(0.92); background: rgba(94, 231, 255, 0.34); }
+  .tc-guard  { grid-area: guard;  border-color: rgba(150, 200, 255, 0.55); }
+  .tc-a      { grid-area: jab; }
+  .tc-b      { grid-area: punch; }
+  .tc-c      { grid-area: kick; }
+  .tc-d      { grid-area: high; }
+  .tc-finisher {
+    grid-area: finish;
+    opacity: .3;
+    border-color: rgba(255, 209, 102, 0.4);
+    color: var(--accent-2);
+  }
+  .tc-finisher.ready {
+    opacity: 1;
+    background: rgba(255, 209, 102, 0.2);
+    border-color: var(--accent-2);
+    box-shadow: 0 0 16px rgba(255, 209, 102, 0.4);
+  }
+
+  /* There is no Esc key on a phone — this is the only way out of a fight. */
+  #pauseBtn {
+    position: absolute;
+    left: 50%;
+    top: 84px;
+    transform: translateX(-50%);
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid rgba(150, 190, 255, 0.35);
+    background: rgba(10, 16, 30, 0.6);
+    backdrop-filter: blur(2px);
+    color: var(--ink);
+    font-size: 11px;
+    letter-spacing: .1em;
+    z-index: 6;
+    touch-action: manipulation;
+  }
+  #pauseBtn:active { background: rgba(94, 231, 255, 0.3); }
+  @media (max-height: 460px) { #pauseBtn { top: 72px; width: 34px; height: 34px; } }
+
+  #rotate {
+    position: absolute;
+    left: 50%;
+    top: 128px;
+    transform: translateX(-50%);
+    background: rgba(10, 16, 30, 0.85);
+    border: 1px solid var(--panel-edge);
+    border-radius: 999px;
+    padding: 7px 15px;
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    color: var(--muted);
+    z-index: 6;
+    pointer-events: none;
+  }
+
+  /* --------------------------------------------------------- small screens */
+
+  @media (max-width: 640px) {
+    .panel { padding: 18px 16px 18px; border-radius: 12px; }
+    h1 { font-size: clamp(24px, 8vw, 34px); letter-spacing: .1em; }
+    .tagline { font-size: 12.5px; margin-bottom: 16px; }
+    h2 { margin: 16px 0 8px; }
+    .grid-2 { gap: 14px; }
+    .lab-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .chip { padding: 8px 11px; font-size: 12.5px; }
+    .primary { padding: 15px 18px; font-size: 14px; flex-basis: 100%; }
+    .blurb { min-height: 0; }
+    table { font-size: 11px; }
+    th, td { padding: 4px 5px; }
+    .winbar { grid-template-columns: 96px 1fr 52px; font-size: 12px; }
+    #hint { font-size: 10px; }
+  }
+
+  /* Short viewports (a phone held sideways) — keep the arena clear of the HUD. */
+  @media (max-height: 460px) {
+    .tc-pad { width: 112px; height: 112px; bottom: max(10px, env(safe-area-inset-bottom)); }
+    .tc-knob { width: 44px; height: 44px; }
+    .tc-buttons { grid-template-columns: repeat(3, 54px); gap: 7px; bottom: max(10px, env(safe-area-inset-bottom)); }
+    .tc-btn { width: 54px; height: 54px; font-size: 9px; }
+    #touch { height: min(52vh, 180px); }
+    .panel { max-height: calc(100vh - 16px); padding: 14px; }
+  }
+
   #boot {
     position: absolute;
     inset: 0;
@@ -237,6 +412,9 @@
   <canvas id="stage" aria-label="Fight arena"></canvas>
 
   <div id="hint" class="hidden"></div>
+  <div id="touch" class="hidden"></div>
+  <button id="pauseBtn" class="hidden" type="button" aria-label="Pause">❚❚</button>
+  <div id="rotate" class="hidden">Turn your phone sideways for a wider view</div>
 
   <div id="overlay">
     <!-- ------------------------------------------------------------ boot -->
@@ -291,6 +469,13 @@
             <option value="off">Off</option>
           </select>
         </label>
+        <label class="field">On-screen controls
+          <select id="touchMode">
+            <option value="auto" selected>Auto</option>
+            <option value="on">Always on</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
       </div>
 
       <div class="actions">
@@ -339,6 +524,14 @@
       <h1 style="font-size:28px">CONTROLS</h1>
       <p class="tagline">Two players, one keyboard. Gamepads are picked up automatically if plugged in.</p>
       <table id="controlTable"></table>
+
+      <h2>On a phone</h2>
+      <ul class="note" style="line-height:1.85">
+        <li><strong>Left stick:</strong> slide to move, push up to jump, down to crouch. Double-tap left or right to dash.</li>
+        <li><strong>Right buttons:</strong> jab, punch, kick, high kick, and a held guard. Crouch while pressing punch for an uppercut, or kick for a sweep.</li>
+        <li><strong>FINISH</strong> lights up once the meter is full. The <strong>❚❚</strong> button at the top pauses.</li>
+        <li>Landscape gives the fight more room, but portrait is framed for it too.</li>
+      </ul>
 
       <h2>Rules that matter</h2>
       <ul class="note" style="line-height:1.85">

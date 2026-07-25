@@ -1,5 +1,7 @@
 # Stick Fight — Combat Simulator
 
+**Play it: <https://rlag1998.github.io/audio_visualiser/stick-fight/>** — works on a phone.
+
 A stick-figure fighting game built on a real fighting-game engine: frame-data moves,
 guard heights, parries, counter hits, combo scaling, stamina, and verlet ragdolls for
 knockdowns and KOs.
@@ -24,8 +26,12 @@ $ npm run balance          # 1800 matches across 5 seeds, ~45 seconds
 
 ## Running it
 
-The game is ES modules, so it needs to be served over HTTP — opening `index.html`
-straight off disk will not work (the browser blocks module loading from `file://`).
+It is already deployed to GitHub Pages from the `gh-pages` branch:
+<https://rlag1998.github.io/audio_visualiser/stick-fight/>
+
+To run it locally: the game is ES modules, so it needs to be served over HTTP — opening
+`index.html` straight off disk will not work (the browser blocks module loading from
+`file://`).
 
 ```bash
 cd stick-fight
@@ -62,6 +68,24 @@ Then open <http://localhost:8080/>. There is no build step and no dependencies.
 
 `Esc` pauses, `R` restarts the match, `F2` draws hitboxes and hurtboxes.
 Gamepads are picked up automatically if one is plugged in.
+
+### On a phone
+
+On-screen controls appear automatically on touch devices (and can be forced on or off from
+the menu). They synthesise the same key presses the physical keys produce, so there is one
+input path to reason about — dashes still come from a double tap, guard is still a held
+button, and the parry window still keys off a fresh press.
+
+- **Left stick** — slide to move; push up to jump, down to crouch. Double-tap left or
+  right to dash. Diagonals work, so jump-forward and crouch-back come for free.
+- **Right cluster** — `JAB`, `PUNCH`, `KICK`, `HIGH`, and a held `GUARD`. Crouch while
+  pressing `PUNCH` for an uppercut or `KICK` for a sweep, exactly as on a keyboard.
+- **FINISH** lights up when the meter is full.
+- The `❚❚` button at the top pauses — there is no Esc key on a phone.
+
+Landscape gives the fight more room and the game will say so once, but portrait is framed
+for it too: the camera pulls in and the floor rises so the fighters stay clear of the
+controls.
 
 ## The fight system
 

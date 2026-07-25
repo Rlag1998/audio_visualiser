@@ -183,8 +183,13 @@ export class Hud {
       const t = clamp(c.life / 1.1, 0, 1);
       const pop = 1 + (1 - t) * 0.12 + Math.max(0, t - 0.85) * 2.2;
 
+      // Keep clear of the bars and the clock. On a phone in landscape the
+      // camera sits high enough that an unclamped popup lands on top of them.
+      const safeTop = view.height < 520 ? 138 : 150;
+      const y = Math.max(safeTop, p.y - (1 - t) * 24);
+
       ctx.save();
-      ctx.translate(p.x, p.y - (1 - t) * 24);
+      ctx.translate(p.x, y);
       ctx.scale(pop, pop);
       ctx.textAlign = 'center';
       ctx.globalAlpha = clamp(t * 2, 0, 1);

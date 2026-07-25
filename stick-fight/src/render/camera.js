@@ -23,6 +23,15 @@ export class Camera {
   resize(w, h) {
     this.width = w;
     this.height = h;
+    this.narrow = w < 620;
+
+    // Where the floor sits. The on-screen controls own the bottom of a phone
+    // screen, so the fight has to be lifted clear of them — a lot on an upright
+    // phone, where the controls take nearly a third of the height.
+    if (h < 460) this.groundFrac = 0.74; // phone held sideways
+    else if (this.narrow && h > w) this.groundFrac = 0.62; // phone held upright
+    else if (h < 620) this.groundFrac = 0.80;
+    else this.groundFrac = 0.84;
   }
 
   /** Frame the two fighters: centred between them, zoomed to fit the gap. */
@@ -32,8 +41,12 @@ export class Camera {
     const height = Math.max(a.y, b.y);
 
     // Frame the pair with a comfortable margin, then pull back as they split.
-    const fit = this.width / (gap + 360);
-    this.targetZoom = clamp(Math.min(fit, this.width / 540), 0.8, 2.1);
+    // A phone gets a tighter margin and shows less of the arena — the desktop
+    // framing on a 390px screen leaves the fighters far too small to read.
+    const margin = this.narrow ? 170 : 360;
+    const maxVisible = this.narrow ? 360 : 540;
+    const fit = this.width / (gap + margin);
+    this.targetZoom = clamp(Math.min(fit, this.width / maxVisible), 0.8, 2.1);
     this.targetX = mid;
     this.targetYLift = clamp(height * 0.35, 0, 90);
 

@@ -101,6 +101,25 @@ export class Keyboard {
     return GAME_KEYS.has(code);
   }
 
+  /**
+   * Synthesise a key press. Touch controls route through here so on-screen
+   * buttons get identical treatment to real keys — including the double-tap
+   * detection that dashes depend on.
+   */
+  press(code) {
+    if (this.down.has(code)) return;
+    this.down.add(code);
+    this.pressed.add(code);
+    const now = performance.now();
+    const last = this.lastTap.get(code) ?? -1e9;
+    if (now - last < DOUBLE_TAP_MS) this.doubleTap.set(code, now);
+    this.lastTap.set(code, now);
+  }
+
+  release(code) {
+    this.down.delete(code);
+  }
+
   isDown(codes) {
     for (const c of codes) if (this.down.has(c)) return true;
     return false;
