@@ -890,10 +890,20 @@
     $('btnLink').addEventListener('click', function () {
       writeHash();
       var url = location.href;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(flash, function () { window.prompt('Permalink:', url); });
-      } else {
-        window.prompt('Permalink:', url);
+      /* Clipboard and prompt are both blocked in some embeddings; the hash is
+       * updated either way, so degrade quietly rather than throwing. */
+      function fallback() {
+        try { window.prompt('Permalink:', url); } catch (e) { /* sandboxed */ }
+        flash();
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(flash, fallback);
+        } else {
+          fallback();
+        }
+      } catch (e) {
+        fallback();
       }
     });
 

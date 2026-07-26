@@ -1,6 +1,9 @@
 # NeuroWorld — a 2D world generator whose terrain *is* a neural network
 
 **[Open `index.html` in any browser. No build, no server, no dependencies.](index.html)**
+Or take **[`neuroworld.html`](neuroworld.html)** — the same app inlined into one
+133 KB file you can email to someone. Regenerate it with `node build.js` after any
+change; the modular files under `js/` stay the source of truth.
 
 Most procedural world generators layer fractal noise and then sort the result into
 biomes with an if-chain. NeuroWorld replaces both halves with neural networks:
@@ -169,6 +172,7 @@ in a fresh tab.
 | `js/render.js` | chunk rasters, colour ramps, coarse LOD downsampling, props, settlements |
 | `js/ui.js` | loss curve, biome bars, network diagram, minimap, permalinks |
 | `js/main.js` | camera, streaming, evolution, input, wiring |
+| `build.js` | inlines the above into one file (`--fragment` omits the document shell) |
 
 Plain scripts and one stylesheet — it runs from `file://` with no toolchain.
 

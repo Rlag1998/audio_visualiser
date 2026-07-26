@@ -1,0 +1,3752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroWorld — a 2D world generator whose terrain is a neural network</title>
+<style>
+/* NeuroWorld — dark instrument-panel styling. No external fonts or assets. */
+
+:root {
+  /* The page commits to one visual world — a dark instrument panel around a map
+     that is its own light source — so the form controls and scrollbars are told
+     to match rather than following the host's theme into a white sliver. */
+  color-scheme: dark;
+
+  --bg: #0a0d12;
+  --bg2: #111721;
+  --line: #1e2836;
+  --ink: #dfe7f0;
+  --dim: #8a99ad;
+  --dimmer: #5c6a7d;
+  --acc: #6fd3c7;
+  --acc2: #d4a05c;
+  --warn: #e46f6f;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --panel-w: 330px;
+  --bar-h: 46px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 var(--sans);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------- boot ----- */
+
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(120% 90% at 50% 0%, #16202d 0%, #080b10 70%);
+  transition: opacity .45s ease;
+}
+#boot.gone { opacity: 0; pointer-events: none; }
+.boot-card { width: min(520px, 88vw); text-align: center; }
+.boot-card h1 {
+  font: 600 34px/1 var(--sans);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  margin: 0 0 6px;
+}
+.boot-sub { color: var(--acc); font: 12px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; margin: 0 0 22px; }
+.boot-bar { height: 4px; background: #1b2430; border-radius: 3px; overflow: hidden; }
+#bootFill { height: 100%; width: 0; background: linear-gradient(90deg, var(--acc), var(--acc2)); transition: width .12s linear; }
+.boot-stat { font: 11px/1.6 var(--mono); color: var(--dim); margin: 12px 0 0; }
+.boot-note { color: var(--dimmer); font-size: 12px; margin: 26px auto 0; max-width: 44ch; }
+
+/* ------------------------------------------------------------ topbar ---- */
+
+#topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--bar-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: linear-gradient(#141b26, #0e131b);
+  border-bottom: 1px solid var(--line);
+  z-index: 20;
+}
+.brand { font: 600 15px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
+.brand span { color: var(--acc); }
+.spacer { flex: 1; }
+
+.field { display: flex; align-items: center; gap: 6px; }
+.field > span {
+  font: 10px/1 var(--mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+.field.grow { flex: 1; }
+
+input[type=text], select {
+  background: #0b0f16;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 7px;
+  font: 12px/1 var(--mono);
+  min-width: 0;
+}
+input[type=text] { width: 118px; }
+input[type=text]:focus, select:focus { outline: none; border-color: var(--acc); }
+.field.grow select { width: 100%; }
+
+.btn {
+  background: #182130;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font: 11px/1 var(--mono);
+  letter-spacing: .06em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { background: #22303f; border-color: #3a4a5e; }
+.btn:active { transform: translateY(1px); }
+.btn.on { background: #1d3b3a; border-color: var(--acc); color: var(--acc); }
+.btn.wide { width: 100%; }
+.btn.grow { flex: 1; }
+.key { color: var(--dimmer); }
+
+.stats { font: 10px/1.35 var(--mono); color: var(--dimmer); text-align: right; white-space: pre; }
+
+/* ------------------------------------------------------------- stage ---- */
+
+#stage {
+  position: fixed;
+  top: var(--bar-h);
+  left: 0;
+  right: var(--panel-w);
+  bottom: 0;
+  overflow: hidden;
+  background: #05070a;
+}
+#map { display: block; width: 100%; height: 100%; cursor: grab; }
+#map.dragging { cursor: grabbing; }
+
+#hud {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  background: rgba(8, 12, 18, .82);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  backdrop-filter: blur(3px);
+}
+#minimap { display: block; border-radius: 3px; cursor: crosshair; image-rendering: pixelated; }
+#hudCoords { font: 10px/1.5 var(--mono); color: var(--dim); margin-top: 6px; }
+.hud-zoom { display: flex; gap: 6px; margin-top: 6px; }
+.hud-zoom .btn { flex: 1; padding: 7px 0; font-size: 14px; line-height: 1; }
+
+#tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(8, 12, 18, .93);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 8px;
+  font: 11px/1.5 var(--mono);
+  color: var(--ink);
+  z-index: 12;
+  max-width: 240px;
+}
+#tooltip b { color: var(--acc); }
+
+#hint {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 38px 11px 14px;
+  max-width: min(560px, calc(100% - 40px));
+  background: rgba(8, 12, 18, .88);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 11.5px/1.5 var(--sans);
+  color: var(--dim);
+  backdrop-filter: blur(4px);
+  transition: opacity .5s ease;
+  z-index: 11;
+}
+#hint b { color: var(--acc); font-weight: 500; }
+#hint.gone { opacity: 0; pointer-events: none; }
+#hintClose {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: none;
+  border: 0;
+  color: var(--dimmer);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+#hintClose:hover { color: var(--ink); }
+
+/* ------------------------------------------------------------- panel ---- */
+
+#panel {
+  position: fixed;
+  top: var(--bar-h);
+  right: 0;
+  bottom: 0;
+  width: var(--panel-w);
+  overflow-y: auto;
+  background: var(--bg2);
+  border-left: 1px solid var(--line);
+  padding: 4px 14px 40px;
+  z-index: 15;
+}
+#panel section { padding: 14px 0; border-bottom: 1px solid var(--line); }
+#panel h2 {
+  font: 600 11px/1 var(--mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--acc);
+  margin: 0 0 8px;
+}
+.tag {
+  font: 10px/1 var(--mono);
+  color: var(--acc2);
+  border: 1px solid #3a3222;
+  border-radius: 3px;
+  padding: 2px 4px;
+  vertical-align: 1px;
+}
+.hint { color: var(--dim); font-size: 11.5px; margin: 0 0 10px; }
+.hint.tight { margin: 6px 0 10px; }
+.hint em { color: var(--ink); font-style: italic; }
+
+.row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+.row.toggles { flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; }
+.row.toggles label { font: 11px/1.6 var(--mono); color: var(--dim); cursor: pointer; }
+input[type=checkbox] { accent-color: var(--acc); }
+
+.slider { display: block; margin-bottom: 9px; }
+.slider > span {
+  display: flex;
+  justify-content: space-between;
+  font: 10px/1.6 var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+}
+.slider b { color: var(--ink); font-weight: 500; }
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-runnable-track { height: 3px; background: #253040; border-radius: 2px; }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--acc);
+  border: 2px solid #0c1118;
+}
+input[type=range]::-moz-range-track { height: 3px; background: #253040; border-radius: 2px; }
+input[type=range]::-moz-range-thumb {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--acc); border: 2px solid #0c1118;
+}
+
+.facts { font: 10.5px/1.7 var(--mono); color: var(--dim); }
+.facts div { display: flex; justify-content: space-between; gap: 8px; }
+.facts b { color: var(--ink); font-weight: 500; }
+.facts.keys { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.facts.keys b { color: var(--acc); }
+.facts .warn { color: var(--warn); }
+
+#panel h3.sub {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  margin: 14px 0 6px;
+}
+#panel h3.sub span { color: var(--acc2); }
+
+#basis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+#basis canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 2px;
+  cursor: pointer;
+  image-rendering: pixelated;
+  outline: 1px solid transparent;
+}
+#basis canvas:hover { outline-color: var(--acc); }
+#basis canvas.sel { outline: 2px solid var(--acc); }
+
+#legend { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; }
+#legend div { display: flex; align-items: center; gap: 6px; font: 10px/1.7 var(--mono); color: var(--dim); }
+#legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,.4) inset; }
+
+#gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+#gallery canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  background: #0b0f16;
+  image-rendering: pixelated;
+}
+#gallery canvas:hover { border-color: var(--acc); }
+#gallery canvas.parent { border-color: var(--acc2); box-shadow: 0 0 0 1px var(--acc2) inset; }
+
+#lossCanvas, #netCanvas, #probCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #0b0f16;
+  margin-bottom: 8px;
+}
+
+.hidden { display: none !important; }
+.only-narrow { display: none; }
+
+/* ------------------------------------------------------------ narrow ---- */
+
+@media (max-width: 900px) {
+  :root { --panel-w: 0px; }
+  #panel {
+    width: min(340px, 92vw);
+    transform: translateX(100%);
+    transition: transform .22s ease;
+    box-shadow: -18px 0 40px rgba(0, 0, 0, .5);
+  }
+  #panel.open { transform: none; }
+  .only-narrow { display: block; }
+  #topbar { gap: 6px; overflow-x: auto; padding-right: 54px; }
+  .stats { display: none; }
+  /* The toolbar scrolls sideways on a phone, so the panel toggle is pinned
+     outside it — otherwise the only way to the controls scrolls out of reach. */
+  #btnPanel { position: fixed; top: 7px; right: 8px; z-index: 30; padding: 8px 11px; }
+  #minimap { width: 112px; height: 112px; }
+  #hud { left: 8px; bottom: 8px; }
+}
+</style>
+</head>
+<body>
+
+<div id="boot">
+  <div class="boot-card">
+    <h1>NeuroWorld</h1>
+    <p class="boot-sub">Training the biome network</p>
+    <div class="boot-bar"><div id="bootFill"></div></div>
+    <p id="bootStat" class="boot-stat">initialising&hellip;</p>
+    <p class="boot-note">
+      A 3-layer MLP is learning to read height, moisture, temperature, slope and
+      river flow and answer with a probability over 16 biomes. Nothing is
+      downloaded &mdash; the gradients are running in this tab.
+    </p>
+  </div>
+</div>
+
+<header id="topbar">
+  <div class="brand">Neuro<span>World</span></div>
+
+  <label class="field">
+    <span>seed</span>
+    <input id="seedInput" type="text" spellcheck="false" value="orpheus">
+  </label>
+  <button id="seedDice" class="btn" title="Random seed (R)">&#9862; roll</button>
+  <button id="btnEvolve" class="btn" title="Breed offspring from this world (N)">&#10022; evolve</button>
+
+  <label class="field">
+    <span>view</span>
+    <select id="selView">
+      <option value="biome">biomes (learned)</option>
+      <option value="elev">elevation</option>
+      <option value="moist">moisture</option>
+      <option value="temp">temperature</option>
+      <option value="slope">slope</option>
+      <option value="hydro">hydrology</option>
+      <option value="flora">flora density</option>
+      <option value="ore">mineral density</option>
+      <option value="neuron">neuron activation</option>
+    </select>
+  </label>
+
+  <div id="neuronPick" class="field hidden">
+    <span>probe</span>
+    <select id="selLayer"></select>
+    <select id="selNeuron"></select>
+  </div>
+
+  <div class="spacer"></div>
+  <div id="stats" class="stats"></div>
+  <button id="btnLink" class="btn" title="Copy a permalink that rebuilds this exact world">link</button>
+  <button id="btnPng" class="btn" title="Save the current view as a PNG">png</button>
+  <button id="btnPanel" class="btn only-narrow">&#9776;</button>
+</header>
+
+<main id="stage">
+  <canvas id="map"></canvas>
+
+  <div id="hud">
+    <canvas id="minimap" width="176" height="176"></canvas>
+    <div id="hudCoords">&mdash;</div>
+    <div class="hud-zoom">
+      <button id="zoomOut" class="btn" title="Zoom out (−)">&minus;</button>
+      <button id="zoomIn" class="btn" title="Zoom in (+)">&plus;</button>
+    </div>
+  </div>
+
+  <div id="tooltip" class="hidden"></div>
+
+  <div id="hint">
+    <span><b>Hover</b> anywhere to trace the network's forward pass for that tile</span>
+    <span><b>N</b> breeds a mutated world &middot; <b>M</b> cycles nine views &middot; <b>R</b> rolls a new brain</span>
+    <span>Drag <b>network authority</b> to 0% to see the plain noise underneath</span>
+    <button id="hintClose" title="Dismiss">&times;</button>
+  </div>
+</main>
+
+<aside id="panel">
+
+  <section>
+    <h2>The network</h2>
+    <p class="hint">
+      A CPPN: random weights, a random activation function per neuron, never
+      trained. Its output <em>is</em> the terrain &mdash; six channels sampled per
+      tile. Change its shape and you change the planet.
+    </p>
+    <div class="row">
+      <label class="field grow"><span>hidden layers</span>
+        <select id="selDepth">
+          <option>2</option><option selected>3</option><option>4</option><option>5</option>
+        </select>
+      </label>
+      <label class="field grow"><span>width</span>
+        <select id="selWidth">
+          <option>12</option><option>18</option><option selected>24</option>
+          <option>32</option><option>48</option>
+        </select>
+      </label>
+    </div>
+    <label class="slider"><span>init gain <b id="vGain">1.90</b></span>
+      <input id="rngGain" type="range" min="0.6" max="3.2" step="0.05" value="1.9">
+    </label>
+    <div id="netFacts" class="facts"></div>
+
+    <h3 class="sub">What <span id="basisLayer">h1</span> computes</h3>
+    <p class="hint tight">
+      Every neuron in the layer, over the same patch of map, from one forward
+      pass. The terrain is a weighted sum of these. Click one to put it on the
+      main map.
+    </p>
+    <div id="basis"></div>
+  </section>
+
+  <section>
+    <h2>Latent vector <span class="tag">z</span></h2>
+    <p class="hint">
+      Four extra inputs held constant across the map. Slide them and every
+      coastline, desert and mountain range re-forms continuously &mdash; same
+      weights, different world.
+    </p>
+    <label class="slider"><span>z<sub>0</sub> <b id="vz0">0.00</b></span><input id="z0" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <label class="slider"><span>z<sub>1</sub> <b id="vz1">0.00</b></span><input id="z1" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <label class="slider"><span>z<sub>2</sub> <b id="vz2">0.00</b></span><input id="z2" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <label class="slider"><span>z<sub>3</sub> <b id="vz3">0.00</b></span><input id="z3" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <div class="row">
+      <button id="btnDrift" class="btn grow">&#9654; drift z <span class="key">space</span></button>
+      <button id="btnRandZ" class="btn">jump</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Offspring</h2>
+    <p class="hint">
+      Interactive evolution. Each candidate is this world's weights plus gaussian
+      noise, with the odd activation function swapped. Pick one and it becomes the
+      parent &mdash; the lineage is replayable from the permalink.
+    </p>
+    <div id="gallery"></div>
+    <label class="slider"><span>mutation &sigma; <b id="vSigma">0.12</b></span>
+      <input id="rngSigma" type="range" min="0.01" max="0.5" step="0.01" value="0.12">
+    </label>
+    <div class="row">
+      <button id="btnSpawn" class="btn grow">respawn candidates</button>
+      <button id="btnBack" class="btn" title="Undo the last mutation step">undo</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>World dials</h2>
+    <label class="slider"><span>feature scale <b id="vScale">260</b> tiles</span>
+      <input id="rngScale" type="range" min="60" max="900" step="10" value="260">
+    </label>
+    <label class="slider"><span>sea level <b id="vSea">0.00</b></span>
+      <input id="rngSea" type="range" min="-0.6" max="0.6" step="0.01" value="0">
+    </label>
+    <label class="slider"><span>network authority <b id="vAuth">80%</b></span>
+      <input id="rngAuth" type="range" min="0" max="1" step="0.01" value="0.8">
+    </label>
+    <p class="hint tight">
+      At 100% the terrain is purely the network's output. At 0% it is plain
+      fractal noise &mdash; the same noise the network gets as input. Slide it to
+      see exactly what the network is contributing.
+    </p>
+    <label class="slider"><span>river width <b id="vRivers">1.00</b></span>
+      <input id="rngRivers" type="range" min="0" max="3" step="0.05" value="1">
+    </label>
+    <div class="row toggles">
+      <label><input id="chkDecor" type="checkbox" checked> props</label>
+      <label><input id="chkPlaces" type="checkbox" checked> places</label>
+      <label><input id="chkContours" type="checkbox"> contours</label>
+      <label><input id="chkGrid" type="checkbox"> chunk grid</label>
+      <label><input id="chkSmooth" type="checkbox"> smooth</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Biome network</h2>
+    <p class="hint">
+      The only trained net here. It learned from a rule oracle, then generalised:
+      it answers with a distribution, so borders come out blended rather than
+      stepped.
+    </p>
+    <canvas id="lossCanvas" width="288" height="66"></canvas>
+    <div id="clsFacts" class="facts"></div>
+    <button id="btnRetrain" class="btn wide">retrain with a new init</button>
+  </section>
+
+  <section>
+    <h2>Legend</h2>
+    <p class="hint">
+      Sixteen classes. What you see on the map is a probability-weighted blend of
+      these, not a pick from them.
+    </p>
+    <div id="legend"></div>
+  </section>
+
+  <section>
+    <h2>Inspector</h2>
+    <p class="hint">Hover the map. This is the forward pass for that one tile.</p>
+    <div id="insFields" class="facts"></div>
+    <canvas id="netCanvas" width="288" height="150"></canvas>
+    <canvas id="probCanvas" width="288" height="126"></canvas>
+  </section>
+
+  <section>
+    <h2>Keys</h2>
+    <div class="facts keys">
+      <div><b>WASD</b><span>pan</span></div>
+      <div><b>wheel</b><span>zoom</span></div>
+      <div><b>drag</b><span>pan</span></div>
+      <div><b>R</b><span>new brain</span></div>
+      <div><b>N</b><span>evolve</span></div>
+      <div><b>M</b><span>cycle view</span></div>
+      <div><b>space</b><span>drift z</span></div>
+      <div><b>G</b><span>grid</span></div>
+    </div>
+  </section>
+
+</aside>
+
+<script>
+/*
+ * rng.js — deterministic randomness and gradient noise.
+ *
+ * Everything in NeuroWorld must be reproducible from a seed: the same seed has
+ * to rebuild the same network weights, the same noise fields and therefore the
+ * same planet, on any machine. So no Math.random() past this file.
+ */
+(function (NW) {
+  'use strict';
+
+  /* FNV-1a over the string, so human-typed seeds land all over the 32-bit range. */
+  function hashString(str) {
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  /* mulberry32: tiny, fast, good enough for weights and jitter. */
+  function rng(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* Box-Muller. Weight init and mutation both want normals, not uniforms. */
+  function gauss(rand) {
+    var u = 0, v = 0;
+    while (u === 0) u = rand();
+    while (v === 0) v = rand();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  /* Integer hash used for per-tile decisions (tree here? rock there?). */
+  function hash2(x, y, seed) {
+    var h = (seed ^ Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1)) >>> 0;
+    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+    h ^= h >>> 12;
+    h = Math.imul(h, 0x297a2d39);
+    h ^= h >>> 15;
+    return h >>> 0;
+  }
+
+  function hash2f(x, y, seed) {
+    return hash2(x, y, seed) / 4294967296;
+  }
+
+  var GN = 512;
+  var GCOS = new Float32Array(GN);
+  var GSIN = new Float32Array(GN);
+  for (var g = 0; g < GN; g++) {
+    var a = (g / GN) * Math.PI * 2;
+    GCOS[g] = Math.cos(a);
+    GSIN[g] = Math.sin(a);
+  }
+
+  /*
+   * Perlin-style gradient noise. Gradients come from the integer hash, so the
+   * field is infinite, tileless and needs no precomputed permutation table.
+   */
+  function Noise(seed) {
+    this.seed = seed >>> 0;
+  }
+
+  Noise.prototype.at = function (x, y) {
+    var x0 = Math.floor(x), y0 = Math.floor(y);
+    var fx = x - x0, fy = y - y0;
+    var u = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+    var v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+    var s = this.seed;
+
+    var i00 = hash2(x0, y0, s) & (GN - 1);
+    var i10 = hash2(x0 + 1, y0, s) & (GN - 1);
+    var i01 = hash2(x0, y0 + 1, s) & (GN - 1);
+    var i11 = hash2(x0 + 1, y0 + 1, s) & (GN - 1);
+
+    var n00 = GCOS[i00] * fx + GSIN[i00] * fy;
+    var n10 = GCOS[i10] * (fx - 1) + GSIN[i10] * fy;
+    var n01 = GCOS[i01] * fx + GSIN[i01] * (fy - 1);
+    var n11 = GCOS[i11] * (fx - 1) + GSIN[i11] * (fy - 1);
+
+    var a0 = n00 + u * (n10 - n00);
+    var a1 = n01 + u * (n11 - n01);
+    return (a0 + v * (a1 - a0)) * 1.4142;
+  };
+
+  /* Fractal sum. `oct` octaves, each half the amplitude and ~double the rate. */
+  Noise.prototype.fbm = function (x, y, oct, lac, gain) {
+    lac = lac || 2.03;
+    gain = gain || 0.5;
+    var sum = 0, amp = 1, norm = 0, fx = x, fy = y;
+    for (var i = 0; i < oct; i++) {
+      sum += amp * this.at(fx, fy);
+      norm += amp;
+      amp *= gain;
+      fx *= lac;
+      fy *= lac;
+      /* Rotate each octave a little so the layers do not line up into grids. */
+      var t = fx * 0.8776 - fy * 0.4794;
+      fy = fx * 0.4794 + fy * 0.8776;
+      fx = t;
+    }
+    return sum / norm;
+  };
+
+  /* Ridged variant: creases where the field crosses zero. Good for mountains. */
+  Noise.prototype.ridged = function (x, y, oct) {
+    var sum = 0, amp = 1, norm = 0, fx = x, fy = y;
+    for (var i = 0; i < oct; i++) {
+      var n = 1 - 2 * Math.abs(this.at(fx, fy));
+      sum += amp * n;
+      norm += amp;
+      amp *= 0.5;
+      fx *= 2.11;
+      fy *= 2.11;
+    }
+    return sum / norm;
+  };
+
+  NW.rand = {
+    hashString: hashString,
+    rng: rng,
+    gauss: gauss,
+    hash2: hash2,
+    hash2f: hash2f,
+    Noise: Noise
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * nn.js — the two neural networks.
+ *
+ *   FieldNet   an untrained CPPN (compositional pattern producing network).
+ *              Random weights + a random activation function per neuron. It is
+ *              never trained; its *shape* is the terrain. Mutating its weights
+ *              mutates the planet, which is what makes worlds evolvable.
+ *
+ *   Classifier a small MLP that IS trained, here in the browser, with Adam and
+ *              cross-entropy, to read (height, moisture, temperature, slope,
+ *              river) and answer "which biome". Because it answers with a
+ *              softmax instead of an if-chain, biome borders come out blended.
+ */
+(function (NW) {
+  'use strict';
+
+  var rand = NW.rand;
+
+  /* ---------------------------------------------------------------- CPPN --- */
+
+  /*
+   * Activation zoo. Every one is bounded to roughly [-1, 1] so deep stacks stay
+   * stable, and each contributes a different visual signature: sin gives bands
+   * and repeats, gauss gives blobs and coastlines, fold gives creases and
+   * ridges, softsign gives soft gradients.
+   */
+  var ACTS = [
+    { name: 'tanh', fn: function (x) { return Math.tanh(x); } },
+    { name: 'sin', fn: function (x) { return Math.sin(x * 2.2); } },
+    { name: 'gauss', fn: function (x) { return Math.exp(-x * x * 2) * 2 - 1; } },
+    { name: 'softsign', fn: function (x) { return x / (1 + Math.abs(x)); } },
+    { name: 'fold', fn: function (x) { return 2 * Math.abs(Math.tanh(x)) - 1; } },
+    { name: 'crease', fn: function (x) { return 1 - 2 * Math.abs(Math.sin(x * 1.6)); } },
+    { name: 'step', fn: function (x) { return 2 / (1 + Math.exp(-4 * x)) - 1; } }
+  ];
+
+  function FieldNet(inDim, sizes, seed, gain) {
+    this.inDim = inDim;
+    this.outDim = sizes[sizes.length - 1];
+    this.layers = [];
+    var rnd = rand.rng(seed);
+    var prev = inDim;
+    for (var l = 0; l < sizes.length; l++) {
+      var out = sizes[l];
+      var last = l === sizes.length - 1;
+      var layer = {
+        inDim: prev,
+        outDim: out,
+        w: new Float32Array(prev * out),
+        b: new Float32Array(out),
+        acts: new Uint8Array(out)
+      };
+      /* Wide init on purpose: near-zero weights make flat, boring worlds. */
+      var sigma = (gain || 1.9) / Math.sqrt(prev);
+      for (var i = 0; i < layer.w.length; i++) layer.w[i] = rand.gauss(rnd) * sigma;
+      for (var j = 0; j < out; j++) {
+        layer.b[j] = rand.gauss(rnd) * 0.45;
+        /* Output neurons stay tanh so downstream code can trust the range. */
+        layer.acts[j] = last ? 0 : (rnd() * ACTS.length) | 0;
+      }
+      this.layers.push(layer);
+      prev = out;
+    }
+    this._bufA = null;
+    this._bufB = null;
+    this._bufN = 0;
+  }
+
+  FieldNet.prototype._buffers = function (n) {
+    if (this._bufN >= n && this._bufA) return;
+    var width = this.inDim;
+    for (var l = 0; l < this.layers.length; l++) width = Math.max(width, this.layers[l].outDim);
+    this._bufA = new Float32Array(n * width);
+    this._bufB = new Float32Array(n * width);
+    this._bufN = n;
+  };
+
+  /*
+   * Forward pass over a whole batch of sample points at once. `X` is n rows of
+   * inDim floats. Weights are stored input-major so the innermost loop walks
+   * contiguous memory, which is the difference between a chunk taking 15ms and
+   * 60ms.
+   *
+   * `stopAt` returns the output of that layer instead of the final one, which is
+   * how the neuron probe reads hidden activations. stopAt < 0 returns the inputs.
+   */
+  FieldNet.prototype.forward = function (X, n, stopAt) {
+    var last = (stopAt === undefined || stopAt === null || stopAt >= this.layers.length)
+      ? this.layers.length - 1 : stopAt;
+    if (last < 0) return X;
+    this._buffers(n);
+    var src = X, dst = this._bufA;
+    for (var l = 0; l <= last; l++) {
+      var la = this.layers[l];
+      var iD = la.inDim, oD = la.outDim, w = la.w, b = la.b, acts = la.acts;
+      for (var i = 0; i < n; i++) {
+        var si = i * iD, di = i * oD;
+        for (var j = 0; j < oD; j++) dst[di + j] = b[j];
+        for (var k = 0; k < iD; k++) {
+          var xv = src[si + k];
+          if (xv === 0) continue;
+          var wr = k * oD;
+          for (var j2 = 0; j2 < oD; j2++) dst[di + j2] += xv * w[wr + j2];
+        }
+        for (var j3 = 0; j3 < oD; j3++) dst[di + j3] = ACTS[acts[j3]].fn(dst[di + j3]);
+      }
+      if (l < last) {
+        src = dst;
+        dst = (dst === this._bufA) ? this._bufB : this._bufA;
+      }
+    }
+    return dst;
+  };
+
+  /* Single point, plus every hidden activation — used by the network inspector. */
+  FieldNet.prototype.trace = function (x) {
+    var acts = [Array.prototype.slice.call(x)];
+    var cur = x;
+    for (var l = 0; l < this.layers.length; l++) {
+      var la = this.layers[l];
+      var out = new Float32Array(la.outDim);
+      for (var j = 0; j < la.outDim; j++) {
+        var s = la.b[j];
+        for (var k = 0; k < la.inDim; k++) s += cur[k] * la.w[k * la.outDim + j];
+        out[j] = ACTS[la.acts[j]].fn(s);
+      }
+      acts.push(Array.prototype.slice.call(out));
+      cur = out;
+    }
+    return acts;
+  };
+
+  FieldNet.prototype.clone = function () {
+    var c = Object.create(FieldNet.prototype);
+    c.inDim = this.inDim;
+    c.outDim = this.outDim;
+    c.layers = this.layers.map(function (la) {
+      return {
+        inDim: la.inDim,
+        outDim: la.outDim,
+        w: la.w.slice(),
+        b: la.b.slice(),
+        acts: la.acts.slice()
+      };
+    });
+    c._bufA = null;
+    c._bufB = null;
+    c._bufN = 0;
+    return c;
+  };
+
+  /*
+   * One step of asexual evolution: jitter every weight, and occasionally swap a
+   * neuron's activation function (which changes the world's character far more
+   * than any weight nudge). Driven by an explicit seed so a lineage of
+   * mutations replays exactly from a permalink.
+   */
+  FieldNet.prototype.mutate = function (seed, sigma) {
+    var c = this.clone();
+    var rnd = rand.rng(seed);
+    for (var l = 0; l < c.layers.length; l++) {
+      var la = c.layers[l];
+      for (var i = 0; i < la.w.length; i++) la.w[i] += rand.gauss(rnd) * sigma;
+      for (var j = 0; j < la.outDim; j++) {
+        la.b[j] += rand.gauss(rnd) * sigma * 0.5;
+        var isLast = l === c.layers.length - 1;
+        if (!isLast && rnd() < sigma * 0.35) la.acts[j] = (rnd() * ACTS.length) | 0;
+      }
+    }
+    return c;
+  };
+
+  FieldNet.prototype.weightCount = function () {
+    return this.layers.reduce(function (a, la) { return a + la.w.length + la.b.length; }, 0);
+  };
+
+  FieldNet.prototype.actName = function (layer, neuron) {
+    return ACTS[this.layers[layer].acts[neuron]].name;
+  };
+
+  /* ---------------------------------------------------------- Classifier --- */
+
+  /*
+   * Trainable MLP: tanh hidden layers, softmax output, Adam. Weights are stored
+   * output-major here because training touches single samples far more often
+   * than it touches batches.
+   */
+  function Classifier(sizes, seed) {
+    this.sizes = sizes.slice();
+    this.L = sizes.length - 1;
+    this.layers = [];
+    var rnd = rand.rng(seed);
+    for (var l = 0; l < this.L; l++) {
+      var iD = sizes[l], oD = sizes[l + 1];
+      var s = Math.sqrt(2 / (iD + oD));
+      var w = new Float32Array(iD * oD);
+      for (var i = 0; i < w.length; i++) w[i] = rand.gauss(rnd) * s;
+      this.layers.push({
+        inDim: iD,
+        outDim: oD,
+        w: w,
+        b: new Float32Array(oD),
+        mw: new Float32Array(iD * oD),
+        vw: new Float32Array(iD * oD),
+        mb: new Float32Array(oD),
+        vb: new Float32Array(oD),
+        a: new Float32Array(oD),
+        d: new Float32Array(oD)
+      });
+    }
+    this.step = 0;
+  }
+
+  Classifier.prototype.predict = function (x, out) {
+    var cur = x;
+    for (var l = 0; l < this.L; l++) {
+      var la = this.layers[l];
+      var a = la.a;
+      var last = l === this.L - 1;
+      for (var j = 0; j < la.outDim; j++) {
+        var s = la.b[j], wr = j * la.inDim;
+        for (var k = 0; k < la.inDim; k++) s += cur[k] * la.w[wr + k];
+        a[j] = last ? s : Math.tanh(s);
+      }
+      if (last) {
+        var max = -Infinity;
+        for (var m = 0; m < la.outDim; m++) if (a[m] > max) max = a[m];
+        var sum = 0;
+        for (var e = 0; e < la.outDim; e++) { a[e] = Math.exp(a[e] - max); sum += a[e]; }
+        for (var n = 0; n < la.outDim; n++) a[n] /= sum;
+      }
+      cur = a;
+    }
+    if (out) { for (var o = 0; o < cur.length; o++) out[o] = cur[o]; return out; }
+    return cur;
+  };
+
+  /* One Adam step on a single sample. Returns the cross-entropy loss. */
+  Classifier.prototype.learn = function (x, label, lr) {
+    var p = this.predict(x);
+    var loss = -Math.log(Math.max(p[label], 1e-9));
+    var top = this.layers[this.L - 1];
+    for (var j = 0; j < top.outDim; j++) top.d[j] = p[j] - (j === label ? 1 : 0);
+
+    for (var l = this.L - 1; l >= 0; l--) {
+      var la = this.layers[l];
+      var inp = l === 0 ? x : this.layers[l - 1].a;
+      if (l > 0) {
+        var below = this.layers[l - 1];
+        for (var k = 0; k < below.outDim; k++) {
+          var g = 0;
+          for (var j2 = 0; j2 < la.outDim; j2++) g += la.d[j2] * la.w[j2 * la.inDim + k];
+          below.d[k] = g * (1 - below.a[k] * below.a[k]);
+        }
+      }
+      this.step++;
+      var t = this.step;
+      var b1c = 1 - Math.pow(0.9, t), b2c = 1 - Math.pow(0.999, t);
+      for (var j3 = 0; j3 < la.outDim; j3++) {
+        var dz = la.d[j3], wr = j3 * la.inDim;
+        for (var k2 = 0; k2 < la.inDim; k2++) {
+          var idx = wr + k2;
+          var gr = dz * inp[k2];
+          la.mw[idx] = 0.9 * la.mw[idx] + 0.1 * gr;
+          la.vw[idx] = 0.999 * la.vw[idx] + 0.001 * gr * gr;
+          la.w[idx] -= lr * (la.mw[idx] / b1c) / (Math.sqrt(la.vw[idx] / b2c) + 1e-8);
+        }
+        la.mb[j3] = 0.9 * la.mb[j3] + 0.1 * dz;
+        la.vb[j3] = 0.999 * la.vb[j3] + 0.001 * dz * dz;
+        la.b[j3] -= lr * (la.mb[j3] / b1c) / (Math.sqrt(la.vb[j3] / b2c) + 1e-8);
+      }
+    }
+    return loss;
+  };
+
+  NW.nn = {
+    ACTS: ACTS,
+    FieldNet: FieldNet,
+    Classifier: Classifier
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * biome.js — biome definitions, the rule oracle, and the training loop.
+ *
+ * The oracle is a hand-written if-chain. We never ship it to the renderer;
+ * instead it labels a few thousand random samples and the MLP in nn.js learns
+ * from those labels. The point is not that a network is a better classifier
+ * than an if-chain — it is that a network *generalises*: it emits a probability
+ * over all 16 biomes, so coastlines, treelines and desert margins come out as
+ * gradients, and the learned decision surface bends in ways nobody typed in.
+ */
+(function (NW) {
+  'use strict';
+
+  var BIOMES = [
+    { id: 0, name: 'Abyssal Ocean', rgb: [11, 38, 74] },
+    { id: 1, name: 'Ocean', rgb: [18, 68, 118] },
+    { id: 2, name: 'Shelf Sea', rgb: [44, 116, 164] },
+    { id: 3, name: 'River', rgb: [66, 126, 163] },
+    { id: 4, name: 'Beach', rgb: [219, 205, 163] },
+    { id: 5, name: 'Desert', rgb: [216, 190, 138] },
+    { id: 6, name: 'Steppe', rgb: [186, 177, 131] },
+    { id: 7, name: 'Savanna', rgb: [158, 158, 106] },
+    { id: 8, name: 'Grassland', rgb: [112, 151, 80] },
+    { id: 9, name: 'Temperate Forest', rgb: [64, 113, 64] },
+    { id: 10, name: 'Rainforest', rgb: [34, 88, 54] },
+    { id: 11, name: 'Taiga', rgb: [55, 97, 79] },
+    { id: 12, name: 'Tundra', rgb: [148, 158, 140] },
+    { id: 13, name: 'Bare Rock', rgb: [139, 132, 121] },
+    { id: 14, name: 'Snow', rgb: [237, 243, 246] },
+    { id: 15, name: 'Volcanic', rgb: [78, 46, 42] }
+  ];
+
+  var K = BIOMES.length;
+
+  var PALETTE_R = new Float32Array(K);
+  var PALETTE_G = new Float32Array(K);
+  var PALETTE_B = new Float32Array(K);
+  for (var i = 0; i < K; i++) {
+    PALETTE_R[i] = BIOMES[i].rgb[0];
+    PALETTE_G[i] = BIOMES[i].rgb[1];
+    PALETTE_B[i] = BIOMES[i].rgb[2];
+  }
+
+  /*
+   * The oracle. Inputs are already normalised: h is height relative to sea
+   * level in [-1, 1], the rest are [0, 1].
+   */
+  function oracle(h, m, t, slope, river) {
+    if (h < -0.42) return 0;
+    if (h < -0.12) return 1;
+    if (h < 0) return 2;
+    if (river > 0.55 && h < 0.7) return 3;
+    if (h < 0.02 && slope < 0.35) return t < 0.18 ? 12 : 4;
+    if (t > 0.82 && h > 0.35 && m < 0.4) return 15;
+    if (h > 0.75 && t < 0.55) return 14;
+    if (h > 0.55 || (slope > 0.85 && h > 0.25)) return t < 0.3 ? 14 : 13;
+    if (t < 0.2) return 12;
+    if (t < 0.42) return m > 0.34 ? 11 : 12;
+    if (m < 0.18) return t > 0.55 ? 5 : 6;
+    if (m < 0.4) return t > 0.62 ? 7 : 8;
+    if (m < 0.68) return t < 0.52 ? 11 : 9;
+    return t > 0.6 ? 10 : 9;
+  }
+
+  /*
+   * Training samples. Two thirds are uniform over the input cube so the network
+   * has an answer for anything a strange planet throws at it; one third is
+   * drawn from clustered "plausible climate" points so the regions that
+   * actually get rendered are the ones it fits best.
+   */
+  function buildDataset(seed, count) {
+    var rnd = NW.rand.rng(seed);
+    var X = new Float32Array(count * 5);
+    var Y = new Uint8Array(count);
+    for (var i = 0; i < count; i++) {
+      var h, m, t, s, r;
+      if (rnd() < 0.66) {
+        h = rnd() * 2 - 1;
+        m = rnd();
+        t = rnd();
+        s = rnd() * rnd();
+        r = rnd() < 0.2 ? rnd() : 0;
+      } else {
+        h = Math.tanh((rnd() + rnd() + rnd() - 1.5) * 1.6);
+        var band = rnd();
+        t = Math.min(1, Math.max(0, band - Math.max(0, h) * 0.4 + (rnd() - 0.5) * 0.15));
+        m = Math.min(1, Math.max(0, 0.5 + (rnd() - 0.5) * 1.3 + (t - 0.5) * 0.3));
+        s = Math.min(1, Math.abs(h) * rnd() * 1.5);
+        r = rnd() < 0.12 ? 0.55 + rnd() * 0.45 : rnd() * 0.3;
+      }
+      var o = i * 5;
+      X[o] = h; X[o + 1] = m; X[o + 2] = t; X[o + 3] = s; X[o + 4] = r;
+      Y[i] = oracle(h, m, t, s, r);
+    }
+    return { X: X, Y: Y, n: count };
+  }
+
+  /*
+   * Time-sliced trainer. Browsers hate a one-second synchronous loop, so the
+   * app pumps this from the animation frame and shows a progress bar; the user
+   * watches the loss come down before the first planet appears.
+   */
+  function Trainer(seed, opts) {
+    opts = opts || {};
+    this.seed = seed >>> 0;
+    this.data = buildDataset(this.seed ^ 0x9e3779b9, opts.samples || 5200);
+    this.net = new NW.nn.Classifier([5, 20, 18, K], this.seed);
+    this.epochs = opts.epochs || 26;
+    this.lr = opts.lr || 0.012;
+    this.epoch = 0;
+    this.cursor = 0;
+    this.loss = 0;
+    this._lossAcc = 0;
+    this._lossN = 0;
+    this.history = [];
+    this.accuracy = 0;
+    this.done = false;
+    this.order = new Int32Array(this.data.n);
+    for (var i = 0; i < this.data.n; i++) this.order[i] = i;
+    this._shuffle();
+  }
+
+  Trainer.prototype._shuffle = function () {
+    var rnd = NW.rand.rng((this.seed + this.epoch * 7919) >>> 0);
+    for (var i = this.order.length - 1; i > 0; i--) {
+      var j = (rnd() * (i + 1)) | 0;
+      var t = this.order[i];
+      this.order[i] = this.order[j];
+      this.order[j] = t;
+    }
+  };
+
+  Trainer.prototype.progress = function () {
+    return Math.min(1, (this.epoch + this.cursor / this.data.n) / this.epochs);
+  };
+
+  /* Runs for at most `ms` milliseconds. Returns true when training finishes. */
+  Trainer.prototype.pump = function (ms) {
+    if (this.done) return true;
+    var end = performance.now() + ms;
+    var x = new Float32Array(5);
+    var lrDecay = 1;
+    do {
+      /* Cosine-ish decay keeps the last epochs from bouncing around a minimum. */
+      lrDecay = 0.15 + 0.85 * (1 - this.progress());
+      for (var step = 0; step < 96; step++) {
+        if (this.cursor >= this.data.n) {
+          this.epoch++;
+          this.cursor = 0;
+          this.loss = this._lossN ? this._lossAcc / this._lossN : 0;
+          this.history.push(this.loss);
+          this._lossAcc = 0;
+          this._lossN = 0;
+          if (this.epoch >= this.epochs) {
+            this.accuracy = this.evaluate();
+            this.done = true;
+            return true;
+          }
+          this._shuffle();
+        }
+        var idx = this.order[this.cursor++];
+        var o = idx * 5;
+        x[0] = this.data.X[o];
+        x[1] = this.data.X[o + 1];
+        x[2] = this.data.X[o + 2];
+        x[3] = this.data.X[o + 3];
+        x[4] = this.data.X[o + 4];
+        this._lossAcc += this.net.learn(x, this.data.Y[idx], this.lr * lrDecay);
+        this._lossN++;
+      }
+    } while (performance.now() < end);
+    return false;
+  };
+
+  /* Agreement with the oracle on a held-out draw — reported honestly in the UI. */
+  Trainer.prototype.evaluate = function () {
+    var test = buildDataset((this.seed ^ 0x51ed270b) >>> 0, 2000);
+    var x = new Float32Array(5), hit = 0;
+    for (var i = 0; i < test.n; i++) {
+      var o = i * 5;
+      x[0] = test.X[o]; x[1] = test.X[o + 1]; x[2] = test.X[o + 2];
+      x[3] = test.X[o + 3]; x[4] = test.X[o + 4];
+      var p = this.net.predict(x);
+      var best = 0;
+      for (var j = 1; j < K; j++) if (p[j] > p[best]) best = j;
+      if (best === test.Y[i]) hit++;
+    }
+    return hit / test.n;
+  };
+
+  NW.biome = {
+    BIOMES: BIOMES,
+    K: K,
+    PALETTE_R: PALETTE_R,
+    PALETTE_G: PALETTE_G,
+    PALETTE_B: PALETTE_B,
+    oracle: oracle,
+    Trainer: Trainer
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * world.js — turning a network into terrain.
+ *
+ * A world is fully described by its WorldSpec (seed, topology, mutation lineage,
+ * latent vector, a few global dials). From the spec we build the CPPN, and from
+ * the CPPN we sample regions of tiles. Chunks are cached; nothing is stored on
+ * disk and nothing is precomputed, so the map is unbounded in every direction.
+ */
+(function (NW) {
+  'use strict';
+
+  var IN_DIM = 16;      /* see encodePoint below */
+  var OUT_DIM = 6;      /* elevation, moisture, temperature, river, flora, ore */
+  var CHUNK = 32;       /* tiles per chunk edge */
+  var MAX_CHUNKS = 400; /* LRU ceiling; ~17 MB of fields and rasters */
+  var AUX = 4;          /* noise channels kept for the authority blend */
+
+  var LIGHT = [-0.55, -0.70, 0.45];
+  var RELIEF = 34;      /* vertical exaggeration used for hillshading */
+  var SLOPE_K = 16.5;   /* per-tile gradient at which slope reads as 1.0 */
+
+  var NORM_SAMPLES = 2048;
+  var NORM_BINS = 256;
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  /*
+   * Hypsometric curve: turns a uniform [0,1] rank into a height in [-1,1] with
+   * the shape real planets have. Read it as a budget — 44% of the surface is
+   * below sea level, a quarter of it is coastal lowland, and only the last 1.5%
+   * reaches the peaks. A single power curve cannot express both a broad lowland
+   * and rare summits, so the control points are given explicitly.
+   */
+  var HYPSO = [
+    [0.000, -1.00], [0.120, -0.55], [0.300, -0.18], [0.440, 0.00],
+    [0.700, 0.12], [0.860, 0.32], [0.950, 0.55], [0.985, 0.78], [1.000, 1.00]
+  ];
+
+  function hypso(u) {
+    if (u <= 0) return -1;
+    if (u >= 1) return 1;
+    var i = 0;
+    while (i < HYPSO.length - 2 && u > HYPSO[i + 1][0]) i++;
+    var a = HYPSO[i], b = HYPSO[i + 1];
+    return a[1] + (u - a[0]) / (b[0] - a[0]) * (b[1] - a[1]);
+  }
+
+  /*
+   * Blending two ranks by weighted average would be wrong: the mean of two
+   * independent uniforms is not uniform, it bunches around 0.5. At authority 0.8
+   * that quietly deleted every mountain and abyss from the map, because the
+   * hypsometric curve was then only ever fed middling ranks.
+   *
+   * So the blend happens in a Gaussian-ish space instead — logit each rank, mix,
+   * rescale so the variance is preserved, and squash back. The marginal
+   * distribution is then the same at every setting of the dial, which is the only
+   * way "network vs noise" can be an honest comparison.
+   */
+  var LOGIT_S = 0.5513;   /* logistic -> unit-variance scale factor */
+
+  function toZ(u) {
+    u = clamp(u, 1e-4, 1 - 1e-4);
+    return Math.log(u / (1 - u)) * LOGIT_S;
+  }
+
+  function fromZ(z) { return 1 / (1 + Math.exp(-z / LOGIT_S)); }
+
+  function defaultSpec(seedText) {
+    return {
+      seed: seedText,
+      depth: 3,
+      width: 24,
+      gain: 1.9,
+      lineage: [],
+      z: [0, 0, 0, 0],
+      scale: 260,
+      sea: 0.0,
+      auth: 0.8,
+      rivers: 1.0
+    };
+  }
+
+  function cloneSpec(spec) {
+    return {
+      seed: spec.seed,
+      depth: spec.depth,
+      width: spec.width,
+      gain: spec.gain,
+      lineage: spec.lineage.map(function (s) { return s.slice(); }),
+      z: spec.z.slice(),
+      scale: spec.scale,
+      sea: spec.sea,
+      auth: spec.auth,
+      rivers: spec.rivers
+    };
+  }
+
+  /* Everything that changes terrain values (as opposed to how we colour them). */
+  function specKey(spec) {
+    return [
+      spec.seed, spec.depth, spec.width, spec.gain.toFixed(3),
+      spec.lineage.map(function (s) { return s[0] + ':' + s[1]; }).join(','),
+      spec.z.map(function (v) { return v.toFixed(4); }).join(','),
+      spec.scale, spec.sea.toFixed(4), spec.auth.toFixed(4), spec.rivers.toFixed(3)
+    ].join('|');
+  }
+
+  function buildNet(spec) {
+    var sizes = [];
+    for (var i = 0; i < spec.depth; i++) sizes.push(spec.width);
+    sizes.push(OUT_DIM);
+    var net = new NW.nn.FieldNet(IN_DIM, sizes, NW.rand.hashString(spec.seed), spec.gain);
+    /* Replay the mutation lineage: this is what makes an evolved world sharable. */
+    for (var m = 0; m < spec.lineage.length; m++) {
+      net = net.mutate(spec.lineage[m][0] >>> 0, spec.lineage[m][1]);
+    }
+    return net;
+  }
+
+  /*
+   * `reuseNorm` skips the normalisation pass and adopts another world's measured
+   * statistics. Measuring costs 2048 forward passes — 30ms at the default
+   * topology, 120ms at the largest — which is fine once per committed change but
+   * ruinous when a slider fires sixty input events a second. So interactions
+   * borrow the previous world's statistics and re-measure when the drag ends.
+   */
+  function World(spec, classifier, reuseNorm, normSamples) {
+    this.spec = cloneSpec(spec);
+    this.key = specKey(this.spec);
+    this.classifier = classifier;
+    this.net = buildNet(this.spec);
+    var s = NW.rand.hashString(this.spec.seed);
+    this.noiseA = new NW.rand.Noise(s ^ 0x1b873593);
+    this.noiseB = new NW.rand.Noise(s ^ 0x85ebca6b);
+    this.noiseC = new NW.rand.Noise(s ^ 0xc2b2ae35);
+    this.noiseD = new NW.rand.Noise(s ^ 0x27d4eb2f);
+    this.chunks = new Map();
+    this.genMs = 0;
+    this.genCount = 0;
+    this._bufs = {};
+    if (reuseNorm) {
+      this.lut = reuseNorm.lut;
+      this.rivBeta = reuseNorm.rivBeta;
+    } else {
+      this.buildNormalizer(normSamples || NORM_SAMPLES);
+    }
+  }
+
+  World.prototype._buf = function (name, Type, len) {
+    var b = this._bufs[name];
+    if (!b || b.length < len || b.constructor !== Type) {
+      b = new Type(len);
+      this._bufs[name] = b;
+    }
+    return b;
+  };
+
+  /*
+   * Octave counts for a given sample spacing. Point-sampling a 4-octave fbm every
+   * 9th tile aliases into confetti, so coarse views drop the octaves finer than
+   * their own Nyquist limit. Cheaper and quieter at the same time.
+   */
+  World.prototype.octaves = function (step) {
+    var S = this.spec.scale;
+    function oct(f, lac, maxO) {
+      var k = Math.log((S / f) / (2.5 * step)) / Math.log(lac);
+      return clamp(Math.floor(k) + 1, 1, maxO);
+    }
+    return {
+      a: oct(0.42, 2.03, 4),
+      b: oct(1.9, 2.03, 4),
+      r: oct(1.15, 2.11, 4),
+      l: oct(0.12, 2.03, 3)
+    };
+  };
+
+  var FULL_OCT = { a: 4, b: 4, r: 4, l: 3 };
+
+  /*
+   * Feature encoding: the CPPN's input vector for one point.
+   *
+   *   0-5   sinusoids of position, including two skewed cross terms. These give
+   *         the network something smooth and periodic to compose with, which is
+   *         where the organic banding and symmetry come from.
+   *   6-11  gradient-noise channels (continental, detail, domain-warped, ridged,
+   *         very-low-frequency, and one product term). Noise supplies the
+   *         non-repeating detail that pure sinusoids cannot.
+   *   12-15 the latent vector z. Constant across the map, so sliding z morphs the
+   *         entire planet without touching a single weight.
+   */
+  World.prototype.encodePoint = function (X, o, aux, ao, xv, yv, oc) {
+    var p = this.spec;
+    var A = this.noiseA, B = this.noiseB, C = this.noiseC, D = this.noiseD;
+    oc = oc || FULL_OCT;
+
+    var nc = A.fbm(xv * 0.42, yv * 0.42, oc.a);
+    var nd = B.fbm(xv * 1.9, yv * 1.9, oc.b);
+    var wq = C.at(xv * 0.9 + nc * 0.7, yv * 0.9 - nd * 0.35);
+    var nr = D.ridged(xv * 1.15, yv * 1.15, oc.r);
+    var nl = A.fbm(xv * 0.12 + 40.5, yv * 0.12 - 17.25, oc.l);
+
+    X[o] = Math.sin(xv);
+    X[o + 1] = Math.cos(xv);
+    X[o + 2] = Math.sin(yv);
+    X[o + 3] = Math.cos(yv);
+    X[o + 4] = Math.sin(1.73 * xv + 0.41 * yv);
+    X[o + 5] = Math.cos(1.29 * yv - 0.67 * xv);
+    X[o + 6] = nc;
+    X[o + 7] = nd;
+    X[o + 8] = wq;
+    X[o + 9] = nr;
+    X[o + 10] = nl;
+    X[o + 11] = nc * nd * 1.6;
+    X[o + 12] = p.z[0];
+    X[o + 13] = p.z[1];
+    X[o + 14] = p.z[2];
+    X[o + 15] = p.z[3];
+
+    /*
+     * The noise end of the "network authority" blend. Weighted as a conventional
+     * fbm terrain — amplitude falling with frequency, a little ridging, a slow
+     * continental term — rather than something deliberately bland. The dial is
+     * meant to be a fair comparison, and it is not one if the baseline is rigged
+     * to look worse than it should.
+     */
+    aux[ao] = clamp(nl * 0.55 + nc * 0.9 + nd * 0.22 + nr * 0.2, -1, 1);
+    aux[ao + 1] = nd;
+    aux[ao + 2] = wq;
+    aux[ao + 3] = nr;
+  };
+
+  World.prototype.encodeRegion = function (X, aux, x0, y0, W, H, step) {
+    var inv = 1 / this.spec.scale;
+    var oc = this.octaves(step);
+    for (var gy = 0; gy < H; gy++) {
+      var yv = (y0 + (gy - 1) * step) * inv;
+      for (var gx = 0; gx < W; gx++) {
+        var gi = gy * W + gx;
+        this.encodePoint(X, gi * IN_DIM, aux, gi * AUX, (x0 + (gx - 1) * step) * inv, yv, oc);
+      }
+    }
+  };
+
+  /*
+   * Percentile normalisation.
+   *
+   * A randomly weighted deep network does not produce a nicely spread output —
+   * tanh stacks pile most of their mass near ±1, which straight off the net gives
+   * a planet that is all abyss and all snowcap with nothing in between. So we
+   * sample a couple of thousand scattered points once per world, measure the
+   * empirical distribution of each output channel, and store it as a lookup
+   * table from raw value to rank in [0, 1].
+   *
+   * The rank is what the terrain is built from. This changes nothing about *where*
+   * the network puts its features — every contour, coastline and ridge is still
+   * exactly a level set of the network — it only fixes how those levels map onto
+   * heights and climates, so every seed yields a legible world.
+   */
+  World.prototype.buildNormalizer = function (samples) {
+    var n = samples || NORM_SAMPLES;
+    var X = new Float32Array(n * IN_DIM);
+    var aux = new Float32Array(n * AUX);
+    var rnd = NW.rand.rng(NW.rand.hashString('norm:' + this.key));
+    var inv = 1 / this.spec.scale;
+    /* Scatter over a span far wider than any single screen, so the statistics
+     * describe the whole planet rather than whatever is under the camera. */
+    var span = Math.max(6000, this.spec.scale * 40);
+    for (var i = 0; i < n; i++) {
+      this.encodePoint(X, i * IN_DIM, aux, i * AUX,
+        (rnd() - 0.5) * span * inv, (rnd() - 0.5) * span * inv);
+    }
+    var out = this.net.forward(X, n);
+
+    /*
+     * Channels 0..OUT_DIM-1 are the network's outputs; the rest are the raw noise
+     * channels. The noise needs the same treatment — an fbm's values bunch around
+     * zero, so feeding it to the hypsometric curve unmeasured yields a world with
+     * no abyss and no summits, which would make the authority dial look like the
+     * network was doing all the work.
+     */
+    var lut = new Float32Array((OUT_DIM + AUX) * NORM_BINS);
+    var col = new Float64Array(n);
+    for (var c = 0; c < OUT_DIM + AUX; c++) {
+      if (c < OUT_DIM) for (var s = 0; s < n; s++) col[s] = out[s * OUT_DIM + c];
+      else for (var s2 = 0; s2 < n; s2++) col[s2] = aux[s2 * AUX + (c - OUT_DIM)];
+      var sorted = Array.prototype.slice.call(col).sort(function (a, b) { return a - b; });
+      var p = 0;
+      for (var b = 0; b < NORM_BINS; b++) {
+        var v = -1 + 2 * b / (NORM_BINS - 1);
+        while (p < n && sorted[p] <= v) p++;
+        lut[c * NORM_BINS + b] = p / n;
+      }
+    }
+    this.lut = lut;
+
+    /*
+     * All six outputs are linear reads of the same hidden layer, so they arrive
+     * correlated — and when the river channel correlates with elevation, its
+     * zero-crossings land on the shoreline and every river reads as a coastal
+     * outline instead of drainage. Measure that correlation and keep only the
+     * part of the river channel that elevation does not explain.
+     */
+    var s0 = 0, s3 = 0, s00 = 0, s33 = 0, s03 = 0;
+    for (var q = 0; q < n; q++) {
+      var a0 = this.rank(0, out[q * OUT_DIM]) - 0.5;
+      var a3 = this.rank(3, out[q * OUT_DIM + 3]) - 0.5;
+      s0 += a0; s3 += a3; s00 += a0 * a0; s33 += a3 * a3; s03 += a0 * a3;
+    }
+    var v0 = s00 / n - (s0 / n) * (s0 / n);
+    var cov = s03 / n - (s0 / n) * (s3 / n);
+    this.rivBeta = v0 > 1e-6 ? clamp(cov / v0, -1.2, 1.2) : 0;
+  };
+
+  /* The measured statistics, for another world to borrow mid-interaction. */
+  World.prototype.norm = function () {
+    return { lut: this.lut, rivBeta: this.rivBeta };
+  };
+
+  /* Raw channel value -> rank in [0,1], linearly interpolated between LUT bins. */
+  World.prototype.rank = function (c, v) {
+    var t = (v + 1) * 0.5 * (NORM_BINS - 1);
+    if (t <= 0) return this.lut[c * NORM_BINS];
+    if (t >= NORM_BINS - 1) return this.lut[c * NORM_BINS + NORM_BINS - 1];
+    var i = t | 0, f = t - i, o = c * NORM_BINS + i;
+    return this.lut[o] + f * (this.lut[o + 1] - this.lut[o]);
+  };
+
+  /*
+   * Sample a rectangle of tiles. `step` > 1 gives a coarse overview (used by the
+   * minimap and the evolution thumbnails) through exactly the same pipeline the
+   * full-detail chunks use, so a thumbnail never lies about the world.
+   *
+   * A one-sample halo is added around the request because slope, hillshading and
+   * river width all need neighbours.
+   */
+  World.prototype.buildRegion = function (x0, y0, w, h, step) {
+    var t0 = performance.now();
+    var p = this.spec;
+    var W = w + 2, H = h + 2, n = W * H;
+
+    var X = this._buf('X', Float32Array, n * IN_DIM);
+    var aux = this._buf('aux', Float32Array, n * AUX);
+    this.encodeRegion(X, aux, x0, y0, W, H, step);
+
+    var out = this.net.forward(X, n);
+
+    /*
+     * Fields on the haloed grid. The network's rank is blended with the noise
+     * channel's rank — in rank space, not value space, so the land/sea split and
+     * the climate spread stay identical however far the authority dial is turned.
+     * That makes the dial an honest A/B between "network" and "plain fbm noise".
+     */
+    var elevG = this._buf('elevG', Float32Array, n);
+    var rivG = this._buf('rivG', Float32Array, n);
+    var moistG = this._buf('moistG', Float32Array, n);
+    var tempG = this._buf('tempG', Float32Array, n);
+    var floraG = this._buf('floraG', Float32Array, n);
+    var oreG = this._buf('oreG', Float32Array, n);
+    var auth = p.auth, noiseW = 1 - auth;
+    var pure = auth > 0.999, noNet = auth < 0.001;
+    var beta = this.rivBeta || 0;
+    var vnorm = 1 / Math.sqrt(auth * auth + noiseW * noiseW);
+    var wa = auth * vnorm, wn = noiseW * vnorm;
+    for (var i = 0; i < n; i++) {
+      var o = i * OUT_DIM, a = i * AUX;
+      var e, m, t, fl, or_;
+      if (pure) {
+        e = this.rank(0, out[o]);
+        m = this.rank(1, out[o + 1]);
+        t = this.rank(2, out[o + 2]);
+        fl = this.rank(4, out[o + 4]);
+        or_ = this.rank(5, out[o + 5]);
+      } else if (noNet) {
+        e = this.rank(6, aux[a]);
+        m = this.rank(7, aux[a + 1]);
+        t = this.rank(8, aux[a + 2]);
+        fl = this.rank(7, aux[a + 1]);
+        or_ = this.rank(9, aux[a + 3]);
+      } else {
+        e = fromZ(wa * toZ(this.rank(0, out[o])) + wn * toZ(this.rank(6, aux[a])));
+        m = fromZ(wa * toZ(this.rank(1, out[o + 1])) + wn * toZ(this.rank(7, aux[a + 1])));
+        t = fromZ(wa * toZ(this.rank(2, out[o + 2])) + wn * toZ(this.rank(8, aux[a + 2])));
+        fl = auth * this.rank(4, out[o + 4]) + noiseW * this.rank(7, aux[a + 1]);
+        or_ = auth * this.rank(5, out[o + 5]) + noiseW * this.rank(9, aux[a + 3]);
+      }
+      elevG[i] = hypso(e);
+      moistG[i] = m;
+      tempG[i] = t;
+      floraG[i] = fl;
+      oreG[i] = or_;
+      /* Rivers need a signed field whose zero set is the median contour, with the
+       * elevation-explained part removed (see buildNormalizer). */
+      var rr = (this.rank(3, out[o + 3]) - 0.5) - beta * (this.rank(0, out[o]) - 0.5);
+      rivG[i] = auth * rr * 2 + noiseW * (this.rank(9, aux[a + 3]) * 2 - 1);
+    }
+
+    var count = w * h;
+    var f = {
+      x0: x0, y0: y0, w: w, h: h, step: step,
+      elev: new Float32Array(count),
+      hn: new Float32Array(count),
+      moist: new Float32Array(count),
+      temp: new Float32Array(count),
+      slope: new Float32Array(count),
+      river: new Float32Array(count),
+      flora: new Float32Array(count),
+      ore: new Float32Array(count),
+      shade: new Float32Array(count),
+      biome: new Uint8Array(count),
+      rgb: new Uint8ClampedArray(count * 3)
+    };
+
+    var R = NW.biome.PALETTE_R, G = NW.biome.PALETTE_G, Bl = NW.biome.PALETTE_B;
+    var K = NW.biome.K;
+    var cin = new Float32Array(5);
+    var gscale = 1 / (2 * step);
+    var slopeK = SLOPE_K;
+    var lx = LIGHT[0], ly = LIGHT[1], lz = LIGHT[2];
+
+    for (var iy = 0; iy < h; iy++) {
+      for (var ix = 0; ix < w; ix++) {
+        var gi = (iy + 1) * W + (ix + 1);
+        var ti = iy * w + ix;
+
+        var e = elevG[gi];
+        var dx = (elevG[gi + 1] - elevG[gi - 1]) * gscale;
+        var dy = (elevG[gi + W] - elevG[gi - W]) * gscale;
+        var mag = Math.sqrt(dx * dx + dy * dy);
+        var slope = clamp(mag * slopeK, 0, 1);
+
+        var hn = clamp(e - p.sea, -1, 1);
+
+        /* Temperature falls with altitude — the one bit of physics we impose. */
+        var temp = clamp(tempG[gi] - Math.max(0, hn) * 0.42, 0, 1);
+        var moist = moistG[gi];
+
+        /*
+         * Rivers: the network's fourth output is read as a signed field, and its
+         * zero-crossings are the watercourses. Distance to the crossing is
+         * |r|/|grad r|, so channels stay a couple of tiles wide however
+         * stretched the field is locally.
+         */
+        var river = 0;
+        if (hn > 0.01) {
+          var rx = (rivG[gi + 1] - rivG[gi - 1]) * gscale;
+          var ry = (rivG[gi + W] - rivG[gi - W]) * gscale;
+          var rmag = Math.sqrt(rx * rx + ry * ry) + 1e-9;
+          var dist = Math.abs(rivG[gi]) / rmag;
+          /* Widen a little when sampling coarsely so rivers stay visible on the
+           * minimap, but cap it — unclamped, a step-9 overview turns all blue. */
+          var width = (0.8 + (1 - hn) * 0.9) * p.rivers * Math.min(step, 2.5);
+          /*
+           * Every zero-crossing of the channel is a watercourse, and there are far
+           * more of them than a map at this scale should draw — left ungated they
+           * cover the continent in a uniform net of threads that reads as contour
+           * lines. Two smooth gates fix it without touching the geometry: rivers
+           * run where it rains, and they fade with altitude, so what survives is
+           * drainage basins with trunks in the lowlands.
+           */
+          river = clamp(1 - dist / width, 0, 1) *
+            clamp((moist - 0.38) * 6, 0, 1) *
+            clamp(1.25 - hn * 1.1, 0, 1);
+        }
+
+        /* Lambertian hillshade, normalised so flat ground sits at 1.0. */
+        var nx = -dx * RELIEF, ny = -dy * RELIEF;
+        var nlen = Math.sqrt(nx * nx + ny * ny + 1);
+        var lam = (nx * lx + ny * ly + lz) / nlen;
+        f.shade[ti] = clamp(1 + (lam - lz) * 1.05, 0.6, 1.34);
+
+        f.elev[ti] = e;
+        f.hn[ti] = hn;
+        f.moist[ti] = moist;
+        f.temp[ti] = temp;
+        f.slope[ti] = slope;
+        f.river[ti] = river;
+        f.flora[ti] = floraG[gi];
+        f.ore[ti] = oreG[gi];
+
+        /* The learned part: a softmax over biomes, blended straight into colour. */
+        cin[0] = hn; cin[1] = moist; cin[2] = temp; cin[3] = slope; cin[4] = river;
+        var pr = this.classifier.predict(cin);
+        var cr = 0, cg = 0, cb = 0, best = 0, bestP = -1;
+        for (var k = 0; k < K; k++) {
+          var pk = pr[k];
+          cr += pk * R[k];
+          cg += pk * G[k];
+          cb += pk * Bl[k];
+          if (pk > bestP) { bestP = pk; best = k; }
+        }
+        f.biome[ti] = best;
+        f.rgb[ti * 3] = cr;
+        f.rgb[ti * 3 + 1] = cg;
+        f.rgb[ti * 3 + 2] = cb;
+      }
+    }
+
+    /* Only full-size regions are worth reporting; a 1-tile probe would skew it. */
+    if (count >= 256) {
+      this.genMs = performance.now() - t0;
+      this.genCount++;
+    }
+    return f;
+  };
+
+  World.prototype.chunkKey = function (cx, cy) { return cx + ',' + cy; };
+
+  World.prototype.getChunk = function (cx, cy) {
+    var k = this.chunkKey(cx, cy);
+    var c = this.chunks.get(k);
+    if (c) {
+      /* Touch for LRU. */
+      this.chunks.delete(k);
+      this.chunks.set(k, c);
+    }
+    return c;
+  };
+
+  World.prototype.makeChunk = function (cx, cy) {
+    var f = this.buildRegion(cx * CHUNK, cy * CHUNK, CHUNK, CHUNK, 1);
+    f.cx = cx;
+    f.cy = cy;
+    f.raster = null;
+    f.rasterMode = null;
+    f.sites = null;
+    this.chunks.set(this.chunkKey(cx, cy), f);
+    while (this.chunks.size > MAX_CHUNKS) {
+      var oldest = this.chunks.keys().next().value;
+      this.chunks.delete(oldest);
+    }
+    return f;
+  };
+
+  /* One tile, on demand, without touching the chunk cache — for the inspector. */
+  World.prototype.probe = function (wx, wy) {
+    var f = this.buildRegion(wx, wy, 1, 1, 1);
+    var X = this._buf('X', Float32Array, 9 * IN_DIM);
+    var vec = new Float32Array(IN_DIM);
+    /* Centre sample of the 3x3 haloed grid encoded by buildRegion. */
+    for (var i = 0; i < IN_DIM; i++) vec[i] = X[(1 * 3 + 1) * IN_DIM + i];
+    var cin = new Float32Array([f.hn[0], f.moist[0], f.temp[0], f.slope[0], f.river[0]]);
+    var probs = this.classifier.predict(cin, new Float32Array(NW.biome.K));
+    return {
+      wx: wx, wy: wy,
+      fields: f,
+      input: vec,
+      trace: this.net.trace(vec),
+      cin: cin,
+      probs: probs
+    };
+  };
+
+  /*
+   * Activation map for a single hidden neuron over a chunk. This is the honest
+   * answer to "what is the network actually computing" — every visible feature
+   * of the world is a weighted sum of pictures like these.
+   */
+  World.prototype.probeNeuron = function (cx, cy, layer, neuron) {
+    var W = CHUNK + 2, H = CHUNK + 2, n = W * H;
+    var X = this._buf('pX', Float32Array, n * IN_DIM);
+    var aux = this._buf('pAux', Float32Array, n * AUX);
+    this.encodeRegion(X, aux, cx * CHUNK, cy * CHUNK, W, H, 1);
+    var act = this.net.forward(X, n, layer);
+    var oD = layer < 0 ? IN_DIM : this.net.layers[layer].outDim;
+    var idx = Math.min(neuron, oD - 1);
+    var outArr = new Float32Array(CHUNK * CHUNK);
+    for (var iy = 0; iy < CHUNK; iy++) {
+      for (var ix = 0; ix < CHUNK; ix++) {
+        outArr[iy * CHUNK + ix] = act[((iy + 1) * W + (ix + 1)) * oD + idx];
+      }
+    }
+    return outArr;
+  };
+
+  /*
+   * Every neuron of one layer, over one square of the map, from a single forward
+   * pass — the activations for all of them come out of the same buffer, so the
+   * whole contact sheet costs one region's worth of work rather than one per
+   * neuron. The returned array is the network's own scratch buffer: read it
+   * before anything else calls forward().
+   */
+  World.prototype.probeLayerGrid = function (x0, y0, n, step, layer) {
+    var X = this._buf('gX', Float32Array, n * n * IN_DIM);
+    var aux = this._buf('gAux', Float32Array, n * n * AUX);
+    this.encodeRegion(X, aux, x0, y0, n, n, step);
+    return {
+      act: this.net.forward(X, n * n, layer),
+      oD: layer < 0 ? IN_DIM : this.net.layers[layer].outDim
+    };
+  };
+
+  NW.world = {
+    CHUNK: CHUNK,
+    IN_DIM: IN_DIM,
+    OUT_DIM: OUT_DIM,
+    World: World,
+    defaultSpec: defaultSpec,
+    cloneSpec: cloneSpec,
+    specKey: specKey,
+    buildNet: buildNet,
+    clamp: clamp
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * render.js — fields to pixels.
+ *
+ * Each chunk is rasterised once into a small offscreen canvas (one pixel per
+ * tile) and then blitted with nearest-neighbour scaling, so zooming costs
+ * nothing and tiles stay crisp. Decorations — trees, rocks, cacti — are drawn
+ * in a second pass in world space, only when tiles are big enough to see them.
+ */
+(function (NW) {
+  'use strict';
+
+  var CHUNK = NW.world.CHUNK;
+  var clamp = NW.world.clamp;
+
+  function ramp(stops) {
+    return function (t, out) {
+      t = clamp(t, 0, 1);
+      var i = 0;
+      while (i < stops.length - 2 && t > stops[i + 1][0]) i++;
+      var a = stops[i], b = stops[i + 1];
+      var u = (t - a[0]) / Math.max(1e-6, b[0] - a[0]);
+      u = clamp(u, 0, 1);
+      out[0] = a[1][0] + u * (b[1][0] - a[1][0]);
+      out[1] = a[1][1] + u * (b[1][1] - a[1][1]);
+      out[2] = a[1][2] + u * (b[1][2] - a[1][2]);
+      return out;
+    };
+  }
+
+  var RAMPS = {
+    elev: ramp([
+      [0.00, [8, 24, 52]], [0.34, [26, 86, 140]], [0.50, [216, 206, 158]],
+      [0.62, [104, 152, 78]], [0.76, [150, 134, 92]], [0.88, [124, 116, 110]],
+      [1.00, [250, 252, 255]]
+    ]),
+    moist: ramp([
+      [0.0, [122, 92, 48]], [0.35, [200, 186, 130]], [0.6, [96, 168, 150]],
+      [1.0, [22, 62, 148]]
+    ]),
+    temp: ramp([
+      [0.0, [58, 92, 176]], [0.3, [110, 178, 200]], [0.55, [226, 216, 150]],
+      [0.78, [222, 132, 62]], [1.0, [154, 32, 32]]
+    ]),
+    slope: ramp([
+      [0.0, [24, 30, 36]], [0.5, [180, 148, 96]], [1.0, [255, 236, 214]]
+    ]),
+    scalar: ramp([
+      [0.0, [16, 22, 34]], [0.4, [58, 96, 120]], [0.7, [140, 200, 150]],
+      [1.0, [244, 250, 220]]
+    ]),
+    neuron: ramp([
+      [0.0, [30, 62, 148]], [0.35, [66, 148, 190]], [0.5, [14, 16, 22]],
+      [0.65, [212, 138, 76]], [1.0, [248, 226, 130]]
+    ])
+  };
+
+  var DEEP = [6, 22, 46];
+  var ICE = [222, 232, 238];
+
+  /* Build (or reuse) the 1px-per-tile raster for a chunk in a given view mode. */
+  function rasterize(chunk, mode, opts) {
+    var tag = mode + '|' + (opts.contours ? 'c' : '') + (opts.probeTag || '');
+    if (chunk.raster && chunk.rasterMode === tag) return chunk.raster;
+    var seed = opts.seed || 0;
+    var bx = chunk.cx * CHUNK, by = chunk.cy * CHUNK;
+
+    var cv = chunk.raster || document.createElement('canvas');
+    cv.width = CHUNK;
+    cv.height = CHUNK;
+    var ctx = cv.getContext('2d');
+    var img = ctx.createImageData(CHUNK, CHUNK);
+    var d = img.data;
+    var tmp = [0, 0, 0];
+    var n = CHUNK * CHUNK;
+
+    for (var i = 0; i < n; i++) {
+      var hn = chunk.hn[i];
+      var r, g, b;
+
+      if (mode === 'biome') {
+        r = chunk.rgb[i * 3];
+        g = chunk.rgb[i * 3 + 1];
+        b = chunk.rgb[i * 3 + 2];
+        if (hn < 0) {
+          /* Water: darken with depth instead of hillshading it. */
+          var depth = clamp(-hn / 0.55, 0, 1);
+          var k = depth * 0.78;
+          r += (DEEP[0] - r) * k;
+          g += (DEEP[1] - g) * k;
+          b += (DEEP[2] - b) * k;
+          /* Shallows: a soft lift over the last of the depth, squared so it fades
+           * out rather than ending on a line. Keep it gentle — at full strength it
+           * reads as a cyan contour drawn around every coast. */
+          var surf = clamp(1 + hn / 0.04, 0, 1);
+          surf *= surf;
+          r += 15 * surf; g += 17 * surf; b += 11 * surf;
+          var ice = clamp((0.14 - chunk.temp[i]) * 8, 0, 1);
+          if (ice > 0) {
+            r += (ICE[0] - r) * ice;
+            g += (ICE[1] - g) * ice;
+            b += (ICE[2] - b) * ice;
+          }
+        } else {
+          var sh = chunk.shade[i];
+          if (chunk.river[i] > 0.45) sh = 1 + (sh - 1) * 0.3;
+          /*
+           * Fine grain. Without it a grassland is a flat slab of one colour at
+           * high zoom; a per-tile hash nudged by the flora channel gives the
+           * ground a weave without inventing any structure that is not there.
+           */
+          var tx = i % CHUNK, ty = (i / CHUNK) | 0;
+          sh *= 0.965 + NW.rand.hash2f(bx + tx, by + ty, seed) * 0.07 +
+            (chunk.flora[i] - 0.5) * 0.05;
+          r *= sh; g *= sh; b *= sh;
+        }
+      } else if (mode === 'elev') {
+        RAMPS.elev(hn * 0.5 + 0.5, tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+        if (hn > 0) { r *= chunk.shade[i]; g *= chunk.shade[i]; b *= chunk.shade[i]; }
+      } else if (mode === 'moist') {
+        RAMPS.moist(chunk.moist[i], tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+      } else if (mode === 'temp') {
+        RAMPS.temp(chunk.temp[i], tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+      } else if (mode === 'slope') {
+        RAMPS.slope(chunk.slope[i], tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+      } else if (mode === 'hydro') {
+        var land = hn > 0;
+        var base = land ? 22 + chunk.hn[i] * 40 : 10;
+        r = base; g = base + (land ? 4 : 14); b = base + (land ? 10 : 44);
+        var rv = chunk.river[i];
+        if (rv > 0) {
+          r += (86 - r) * rv;
+          g += (196 - g) * rv;
+          b += (236 - b) * rv;
+        }
+      } else if (mode === 'flora') {
+        RAMPS.scalar(chunk.flora[i] * (hn > 0 ? 1 : 0.15), tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+      } else if (mode === 'ore') {
+        RAMPS.scalar(chunk.ore[i] * (hn > 0 ? 1 : 0.2), tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+      } else if (mode === 'neuron') {
+        var act = chunk.probe ? chunk.probe[i] : 0;
+        RAMPS.neuron(act * 0.5 + 0.5, tmp);
+        r = tmp[0]; g = tmp[1]; b = tmp[2];
+      } else {
+        r = g = b = 0;
+      }
+
+      if (opts.contours && mode !== 'neuron') {
+        /* Darken where a 0.08-elevation band boundary falls between neighbours. */
+        var x = i % CHUNK, y = (i / CHUNK) | 0;
+        var lv = Math.floor((hn + 1) / 0.08);
+        var rt = x < CHUNK - 1 ? chunk.hn[i + 1] : hn;
+        var dn = y < CHUNK - 1 ? chunk.hn[i + CHUNK] : hn;
+        if (lv !== Math.floor((rt + 1) / 0.08) || lv !== Math.floor((dn + 1) / 0.08)) {
+          r *= 0.74; g *= 0.74; b *= 0.74;
+        }
+      }
+
+      var o = i * 4;
+      d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+
+    ctx.putImageData(img, 0, 0);
+    chunk.raster = cv;
+    chunk.rasterMode = tag;
+    return cv;
+  }
+
+  /* ------------------------------------------------------------- decor --- */
+
+  var FOREST = { 9: 1, 10: 1, 11: 1 };
+
+  function tree(ctx, x, y, s, kind, tint) {
+    if (kind === 'conifer') {
+      ctx.fillStyle = 'rgba(28,20,12,0.45)';
+      ctx.fillRect(x - s * 0.06, y - s * 0.05, s * 0.12, s * 0.3);
+      ctx.fillStyle = tint;
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * 1.05);
+      ctx.lineTo(x + s * 0.42, y);
+      ctx.lineTo(x - s * 0.42, y);
+      ctx.closePath();
+      ctx.fill();
+    } else if (kind === 'palm') {
+      ctx.strokeStyle = 'rgba(58,44,26,0.8)';
+      ctx.lineWidth = Math.max(1, s * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x + s * 0.1, y - s * 0.5, x + s * 0.22, y - s * 0.8);
+      ctx.stroke();
+      ctx.fillStyle = tint;
+      ctx.beginPath();
+      ctx.arc(x + s * 0.22, y - s * 0.8, s * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(38,26,16,0.5)';
+      ctx.fillRect(x - s * 0.06, y - s * 0.16, s * 0.12, s * 0.26);
+      ctx.fillStyle = tint;
+      ctx.beginPath();
+      ctx.arc(x, y - s * 0.42, s * 0.36, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /*
+   * Scatter props over the visible part of one chunk. Positions come from the
+   * tile hash, never from Math.random, so nothing shifts while you pan.
+   */
+  function drawDecor(ctx, world, chunk, ox, oy, tilePx, view) {
+    if (tilePx < 8) return;
+    var seed = NW.rand.hashString(world.key) ^ 0x5bf03635;
+    var x0 = Math.max(0, Math.floor((view.left - ox) / tilePx));
+    var x1 = Math.min(CHUNK, Math.ceil((view.right - ox) / tilePx));
+    var y0 = Math.max(0, Math.floor((view.top - oy) / tilePx));
+    var y1 = Math.min(CHUNK, Math.ceil((view.bottom - oy) / tilePx));
+    var s = tilePx;
+
+    for (var ty = y0; ty < y1; ty++) {
+      for (var tx = x0; tx < x1; tx++) {
+        var i = ty * CHUNK + tx;
+        if (chunk.hn[i] <= 0.005 || chunk.river[i] > 0.42) continue;
+        var bi = chunk.biome[i];
+        var wx = chunk.cx * CHUNK + tx, wy = chunk.cy * CHUNK + ty;
+        var hv = NW.rand.hash2f(wx, wy, seed);
+        var jx = NW.rand.hash2f(wx + 7919, wy, seed) - 0.5;
+        var jy = NW.rand.hash2f(wx, wy + 104729, seed) - 0.5;
+        var px = ox + (tx + 0.5 + jx * 0.7) * s;
+        var py = oy + (ty + 0.75 + jy * 0.5) * s;
+        var flora = chunk.flora[i];
+        var shade = chunk.shade[i];
+
+        if (FOREST[bi]) {
+          var dens = 0.3 + flora * 0.55;
+          if (hv > dens) continue;
+          var kind = bi === 11 ? 'conifer' : (bi === 10 ? (hv < dens * 0.4 ? 'palm' : 'round') : 'round');
+          var base = bi === 10 ? [26, 96, 54] : (bi === 11 ? [44, 92, 74] : [56, 118, 58]);
+          var v = 0.75 + hv * 0.5;
+          tree(ctx, px, py, s * (0.9 + jy * 0.3), kind,
+            'rgb(' + ((base[0] * v * shade) | 0) + ',' + ((base[1] * v * shade) | 0) + ',' + ((base[2] * v * shade) | 0) + ')');
+        } else if (bi === 8 || bi === 7 || bi === 12) {
+          if (hv > 0.06 + flora * 0.2) continue;
+          ctx.strokeStyle = bi === 12 ? 'rgba(196,206,190,0.7)' : 'rgba(72,104,44,0.72)';
+          ctx.lineWidth = Math.max(1, s * 0.09);
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(px - s * 0.18, py - s * 0.34);
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + s * 0.16, py - s * 0.4);
+          ctx.stroke();
+        } else if (bi === 5 || bi === 6) {
+          if (hv > 0.05) continue;
+          ctx.strokeStyle = 'rgba(64,104,62,0.85)';
+          ctx.lineWidth = Math.max(1.2, s * 0.14);
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(px, py - s * 0.62);
+          ctx.moveTo(px, py - s * 0.34);
+          ctx.lineTo(px + s * 0.2, py - s * 0.48);
+          ctx.stroke();
+        } else if (bi === 13 || bi === 14) {
+          if (hv > 0.14) continue;
+          ctx.fillStyle = bi === 14 ? 'rgba(150,158,168,0.75)' : 'rgba(96,90,82,0.9)';
+          ctx.beginPath();
+          ctx.ellipse(px, py - s * 0.15, s * 0.26, s * 0.18, jx, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (bi === 15) {
+          if (hv > 0.3) continue;
+          var glow = 0.4 + chunk.ore[i] * 0.6;
+          ctx.fillStyle = 'rgba(' + (230 * glow | 0) + ',' + (110 * glow | 0) + ',30,0.85)';
+          ctx.fillRect(px - s * 0.12, py - s * 0.2, s * 0.24, s * 0.24);
+        }
+
+        /* Mineral glints, the sixth network output made visible. */
+        if (tilePx >= 12 && chunk.ore[i] > 0.9 && hv < 0.35) {
+          ctx.fillStyle = 'rgba(255,232,150,0.9)';
+          ctx.fillRect(px + s * 0.24, py - s * 0.42, Math.max(1, s * 0.1), Math.max(1, s * 0.1));
+        }
+      }
+    }
+  }
+
+  /* ---------------------------------------------------------- settlements --- */
+
+  /*
+   * Places are read out of the same six channels the terrain is made of: fresh
+   * water, workable ground, flora to live off, ore to dig, a tolerable climate.
+   * One candidate per 44-tile cell, its position fixed by a hash of the cell
+   * coordinates, accepted or rejected by the score — so a settlement belongs to
+   * exactly one cell and never depends on which chunks happen to be loaded.
+   *
+   * The name is chosen from the terrain that earned the site its score, which is
+   * why river towns are fords and headlands are havens.
+   */
+  var CELL = 34;
+
+  var SYL_A = ['bar', 'cal', 'dun', 'el', 'far', 'gor', 'hal', 'ith', 'kel', 'mor',
+    'nor', 'ost', 'pel', 'ryn', 'sal', 'thar', 'ul', 'ven', 'wyn', 'yar', 'aske', 'brin'];
+  var SYL_B = ['bry', 'dor', 'gan', 'hem', 'lin', 'mar', 'nes', 'rid', 'sten',
+    'thal', 'vor', 'wick', 'gath', 'mel'];
+  var SUFFIX = {
+    river: ['ford', 'mere', 'bridge', 'weir'],
+    coast: ['port', 'haven', 'bay', 'strand'],
+    high: ['fell', 'crag', 'scar', 'heights'],
+    wood: ['holt', 'wood', 'glade', 'thicket'],
+    dry: ['reach', 'waste', 'well', 'span'],
+    plain: ['stead', 'ton', 'field', 'march', 'garth']
+  };
+
+  function placeName(seed, kind) {
+    var rnd = NW.rand.rng(seed);
+    var s = SYL_A[(rnd() * SYL_A.length) | 0];
+    if (rnd() < 0.45) s += SYL_B[(rnd() * SYL_B.length) | 0];
+    var list = SUFFIX[kind] || SUFFIX.plain;
+    s += list[(rnd() * list.length) | 0];
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  /* Is open water within a few tiles? Sampled inside the chunk only. */
+  function nearWater(chunk, tx, ty, radius) {
+    for (var a = 0; a < 12; a++) {
+      var ang = a / 12 * Math.PI * 2;
+      var qx = (tx + Math.cos(ang) * radius) | 0;
+      var qy = (ty + Math.sin(ang) * radius) | 0;
+      if (qx < 0 || qy < 0 || qx >= CHUNK || qy >= CHUNK) continue;
+      if (chunk.hn[qy * CHUNK + qx] < 0) return true;
+    }
+    return false;
+  }
+
+  function computeSites(chunk, seed) {
+    var sites = [];
+    var bx = chunk.cx * CHUNK, by = chunk.cy * CHUNK;
+    var g0x = Math.floor(bx / CELL), g1x = Math.floor((bx + CHUNK - 1) / CELL);
+    var g0y = Math.floor(by / CELL), g1y = Math.floor((by + CHUNK - 1) / CELL);
+
+    for (var gy = g0y; gy <= g1y; gy++) {
+      for (var gx = g0x; gx <= g1x; gx++) {
+        var h = NW.rand.hash2(gx, gy, seed);
+        var wx = gx * CELL + (h % CELL);
+        var wy = gy * CELL + (((h / CELL) | 0) % CELL);
+        var tx = wx - bx, ty = wy - by;
+        if (tx < 0 || ty < 0 || tx >= CHUNK || ty >= CHUNK) continue;
+
+        var i = ty * CHUNK + tx;
+        var hn = chunk.hn[i];
+        if (hn < 0.004 || hn > 0.62) continue;
+        var slope = chunk.slope[i];
+        if (slope > 0.62) continue;
+
+        var river = chunk.river[i] > 0.2;
+        var coast = nearWater(chunk, tx, ty, 5);
+        var temp = chunk.temp[i];
+        var score =
+          (river ? 0.34 : 0) +
+          (coast ? 0.24 : 0) +
+          chunk.flora[i] * 0.26 +
+          chunk.ore[i] * 0.16 +
+          (1 - slope) * 0.18 +
+          (1 - Math.abs(temp - 0.55) * 2) * 0.2 +
+          chunk.moist[i] * 0.1;
+        if (score < 0.58) continue;
+
+        var bi = chunk.biome[i];
+        var kind = river ? 'river' : (coast ? 'coast'
+          : (hn > 0.34 ? 'high'
+            : (bi === 9 || bi === 10 || bi === 11 ? 'wood'
+              : (chunk.moist[i] < 0.25 ? 'dry' : 'plain'))));
+
+        sites.push({
+          tx: tx, ty: ty,
+          rank: score > 1.0 ? 2 : (score > 0.8 ? 1 : 0),
+          name: placeName(h ^ 0x5f3a, kind)
+        });
+      }
+    }
+    return sites;
+  }
+
+  function drawSites(ctx, chunk, ox, oy, tilePx, seed) {
+    if (!chunk.sites || chunk.sitesSeed !== seed) {
+      chunk.sites = computeSites(chunk, seed);
+      chunk.sitesSeed = seed;
+    }
+    if (!chunk.sites.length) return;
+    var labels = tilePx >= 5.5;
+    ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+
+    for (var s = 0; s < chunk.sites.length; s++) {
+      var site = chunk.sites[s];
+      var px = ox + (site.tx + 0.5) * tilePx;
+      var py = oy + (site.ty + 0.5) * tilePx;
+      var rad = 2.6 + site.rank * 1.6;
+
+      ctx.fillStyle = 'rgba(12,16,22,0.85)';
+      ctx.beginPath();
+      ctx.arc(px, py, rad + 1.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = site.rank === 2 ? '#f2e3c0' : (site.rank === 1 ? '#e0d3b4' : '#c3bda9');
+      ctx.beginPath();
+      if (site.rank === 2) {
+        /* Cities get a ringed marker so the hierarchy reads at a glance. */
+        ctx.arc(px, py, rad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(12,16,22,0.85)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(px, py, rad - 2.2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.arc(px, py, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (labels) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(8,11,16,0.9)';
+        ctx.strokeText(site.name, px, py - rad - 5);
+        ctx.fillStyle = site.rank ? '#f4ecd8' : '#d8d2c2';
+        ctx.fillText(site.name, px, py - rad - 5);
+      }
+    }
+    ctx.textAlign = 'left';
+  }
+
+  /* ---------------------------------------------------------- coarse LOD --- */
+
+  /*
+   * Shaded RGB for a coarsely sampled region, averaged down by `ss` in each axis.
+   *
+   * Supersampling matters here: the network puts real detail at a few tiles per
+   * cycle, so point-sampling every 6th tile turns a continent into confetti —
+   * stray snowcaps and beaches from single samples that happened to land on a
+   * peak. Averaging sub-samples is the only honest way to shrink the map.
+   */
+  function boxBlur(d, w, h) {
+    var src = d.slice();
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var o = (y * w + x) * 4;
+        for (var c = 0; c < 3; c++) {
+          var sum = 0, n = 0;
+          for (var dy = -1; dy <= 1; dy++) {
+            var yy = y + dy;
+            if (yy < 0 || yy >= h) continue;
+            for (var dx = -1; dx <= 1; dx++) {
+              var xx = x + dx;
+              if (xx < 0 || xx >= w) continue;
+              sum += src[(yy * w + xx) * 4 + c];
+              n++;
+            }
+          }
+          d[o + c] = sum / n;
+        }
+      }
+    }
+  }
+
+  /* Box-blur a canvas in place. Used once on a completed minimap. The caller
+   * passes its own context so it can have been created with willReadFrequently. */
+  function blurCanvas(cv, ctx) {
+    ctx = ctx || cv.getContext('2d');
+    var img = ctx.getImageData(0, 0, cv.width, cv.height);
+    boxBlur(img.data, cv.width, cv.height);
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function regionToCanvas(region, ss, out, blur) {
+    var w = Math.floor(region.w / ss), h = Math.floor(region.h / ss);
+    var cv = out || document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    var ctx = cv.getContext('2d');
+    var img = ctx.createImageData(w, h);
+    var d = img.data;
+    var inv = 1 / (ss * ss);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var r = 0, g = 0, b = 0;
+        for (var sy = 0; sy < ss; sy++) {
+          var row = (y * ss + sy) * region.w + x * ss;
+          for (var sx = 0; sx < ss; sx++) {
+            var i = row + sx;
+            var hn = region.hn[i];
+            var sh = hn > 0 ? region.shade[i] : 1;
+            var dp = hn < 0 ? clamp(-hn / 0.55, 0, 1) * 0.78 : 0;
+            r += region.rgb[i * 3] * sh * (1 - dp) + DEEP[0] * dp;
+            g += region.rgb[i * 3 + 1] * sh * (1 - dp) + DEEP[1] * dp;
+            b += region.rgb[i * 3 + 2] * sh * (1 - dp) + DEEP[2] * dp;
+          }
+        }
+        var o = (y * w + x) * 4;
+        d[o] = r * inv;
+        d[o + 1] = g * inv;
+        d[o + 2] = b * inv;
+        d[o + 3] = 255;
+      }
+    }
+    if (blur) boxBlur(d, w, h);
+    ctx.putImageData(img, 0, 0);
+    return cv;
+  }
+
+  NW.render = {
+    RAMPS: RAMPS,
+    rasterize: rasterize,
+    drawDecor: drawDecor,
+    drawSites: drawSites,
+    regionToCanvas: regionToCanvas,
+    blurCanvas: blurCanvas
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * ui.js — the readouts: loss curve, biome distribution, network diagram,
+ * minimap, and permalink serialisation.
+ *
+ * These panels exist so the generator is not a black box. Every pixel of the map
+ * comes from the forward pass drawn in drawNet(), and the biome bars are the
+ * literal softmax the renderer blended to colour that tile.
+ */
+(function (NW) {
+  'use strict';
+
+  var clamp = NW.world.clamp;
+
+  function crisp(canvas) {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var w = canvas.clientWidth || canvas.width;
+    var h = parseInt(canvas.getAttribute('height'), 10) || canvas.height;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+    var ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx: ctx, w: w, h: h };
+  }
+
+  /* Signed activation colour: cool for negative, warm for positive. */
+  function actColor(v, alpha) {
+    var t = clamp(v, -1, 1);
+    var r, g, b;
+    if (t >= 0) { r = 26 + t * 216; g = 34 + t * 150; b = 44 + t * 40; }
+    else { r = 26 - t * 30; g = 34 - t * 110; b = 44 - t * 196; }
+    return 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',' + (alpha === undefined ? 1 : alpha) + ')';
+  }
+
+  function facts(el, pairs) {
+    var html = '';
+    for (var i = 0; i < pairs.length; i++) {
+      html += '<div><span>' + pairs[i][0] + '</span><b' +
+        (pairs[i][2] ? ' class="' + pairs[i][2] + '"' : '') + '>' + pairs[i][1] + '</b></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  /* --------------------------------------------------------- loss curve --- */
+
+  function drawLoss(canvas, trainer) {
+    var c = crisp(canvas), ctx = c.ctx;
+    ctx.clearRect(0, 0, c.w, c.h);
+    var hist = trainer.history;
+    ctx.strokeStyle = '#1c2532';
+    ctx.lineWidth = 1;
+    for (var g = 1; g < 4; g++) {
+      var yy = Math.round(c.h * g / 4) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(c.w, yy); ctx.stroke();
+    }
+    if (hist.length < 2) {
+      ctx.fillStyle = '#5c6a7d';
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText('training…', 8, c.h / 2);
+      return;
+    }
+    var max = 0;
+    for (var i = 0; i < hist.length; i++) max = Math.max(max, hist[i]);
+    max = Math.max(max, 0.05);
+    var pad = 4;
+    ctx.strokeStyle = '#6fd3c7';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (var j = 0; j < hist.length; j++) {
+      var x = pad + (c.w - pad * 2) * (j / (trainer.epochs - 1));
+      var y = pad + (c.h - pad * 2) * (1 - Math.min(1, hist[j] / max) * 0.98);
+      if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#5c6a7d';
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillText(max.toFixed(2), 4, 10);
+    ctx.fillText('loss ' + hist[hist.length - 1].toFixed(4) + '  ep ' + hist.length + '/' + trainer.epochs, 4, c.h - 4);
+  }
+
+  /* ------------------------------------------------------- biome probs --- */
+
+  function drawProbs(canvas, probs) {
+    var c = crisp(canvas), ctx = c.ctx;
+    ctx.clearRect(0, 0, c.w, c.h);
+    if (!probs) return;
+    var B = NW.biome.BIOMES;
+    var order = [];
+    for (var i = 0; i < probs.length; i++) order.push(i);
+    order.sort(function (a, b) { return probs[b] - probs[a]; });
+    var rows = 6;
+    var rowH = c.h / rows;
+    ctx.font = '9.5px ui-monospace, monospace';
+    ctx.textBaseline = 'middle';
+    for (var r = 0; r < rows; r++) {
+      var id = order[r];
+      var p = probs[id];
+      var y = r * rowH + rowH / 2;
+      var labelW = 104;
+      ctx.fillStyle = 'rgb(' + B[id].rgb.join(',') + ')';
+      ctx.fillRect(4, y - 4, 8, 8);
+      ctx.fillStyle = r === 0 ? '#dfe7f0' : '#8a99ad';
+      ctx.fillText(B[id].name.slice(0, 15), 16, y);
+      var bw = (c.w - labelW - 34) * p;
+      ctx.fillStyle = '#1d2634';
+      ctx.fillRect(labelW, y - 4, c.w - labelW - 34, 8);
+      ctx.fillStyle = r === 0 ? '#6fd3c7' : '#3f6f72';
+      ctx.fillRect(labelW, y - 4, Math.max(1, bw), 8);
+      ctx.fillStyle = '#5c6a7d';
+      ctx.fillText((p * 100).toFixed(1) + '%', c.w - 30, y);
+    }
+  }
+
+  /* --------------------------------------------------- network diagram --- */
+
+  function pickIndices(count, maxShown) {
+    var idx = [];
+    if (count <= maxShown) {
+      for (var i = 0; i < count; i++) idx.push(i);
+    } else {
+      for (var j = 0; j < maxShown; j++) idx.push(Math.round(j * (count - 1) / (maxShown - 1)));
+    }
+    return idx;
+  }
+
+  function drawNet(canvas, net, trace) {
+    var c = crisp(canvas), ctx = c.ctx;
+    ctx.clearRect(0, 0, c.w, c.h);
+    if (!trace) {
+      ctx.fillStyle = '#5c6a7d';
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText('hover the map to trace a forward pass', 10, c.h / 2);
+      return;
+    }
+    var cols = trace.length;
+    var maxShown = 13;
+    var shown = [];
+    for (var l = 0; l < cols; l++) shown.push(pickIndices(trace[l].length, maxShown));
+
+    var padX = 16, padY = 12;
+    var colX = [];
+    for (var i = 0; i < cols; i++) colX.push(padX + (c.w - padX * 2) * (cols === 1 ? 0 : i / (cols - 1)));
+    function nodeY(col, k) {
+      var n = shown[col].length;
+      if (n === 1) return c.h / 2;
+      return padY + (c.h - padY * 2) * (k / (n - 1));
+    }
+
+    /* Edges: for each shown target, the strongest few shown incoming weights. */
+    for (var t = 1; t < cols; t++) {
+      var layer = net.layers[t - 1];
+      var srcIdx = shown[t - 1], dstIdx = shown[t];
+      for (var dj = 0; dj < dstIdx.length; dj++) {
+        var j = dstIdx[dj];
+        var cand = [];
+        for (var si = 0; si < srcIdx.length; si++) {
+          var k = srcIdx[si];
+          cand.push([Math.abs(layer.w[k * layer.outDim + j]), layer.w[k * layer.outDim + j], si]);
+        }
+        cand.sort(function (a, b) { return b[0] - a[0]; });
+        var keep = Math.min(4, cand.length);
+        for (var q = 0; q < keep; q++) {
+          var w = cand[q][1];
+          var a = clamp(Math.abs(w) * 0.8, 0.05, 0.55);
+          ctx.strokeStyle = w >= 0 ? 'rgba(111,211,199,' + a + ')' : 'rgba(212,124,92,' + a + ')';
+          ctx.lineWidth = clamp(Math.abs(w) * 1.4, 0.4, 2);
+          ctx.beginPath();
+          ctx.moveTo(colX[t - 1], nodeY(t - 1, cand[q][2]));
+          ctx.lineTo(colX[t], nodeY(t, dj));
+          ctx.stroke();
+        }
+      }
+    }
+
+    for (var col = 0; col < cols; col++) {
+      var ids = shown[col];
+      for (var m = 0; m < ids.length; m++) {
+        var v = trace[col][ids[m]];
+        var rad = col === 0 || col === cols - 1 ? 4 : 4.5;
+        ctx.beginPath();
+        ctx.arc(colX[col], nodeY(col, m), rad, 0, Math.PI * 2);
+        ctx.fillStyle = actColor(v);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(190,205,220,0.35)';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#4c5a6d';
+      ctx.font = '8px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      var label = col === 0 ? 'in' + trace[0].length
+        : (col === cols - 1 ? 'out' : 'h' + col);
+      ctx.fillText(label, colX[col], c.h - 2);
+      if (trace[col].length > maxShown) ctx.fillText('·' + trace[col].length, colX[col], 8);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  /* ------------------------------------------------------------ minimap --- */
+
+  function drawMinimap(canvas, src, origin, span, cam, view) {
+    var ctx = canvas.getContext('2d');
+    var W = canvas.width, H = canvas.height;
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, W, H);
+    if (!origin) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(src, 0, 0, W, H);
+
+    /* Viewport rectangle, in minimap pixels. */
+    var s = W / span;
+    var vx = (cam.x - view.wTiles / 2 - origin.x0) * s;
+    var vy = (cam.y - view.hTiles / 2 - origin.y0) * s;
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(vx) + 0.5, Math.round(vy) + 0.5,
+      Math.max(3, view.wTiles * s), Math.max(3, view.hTiles * s));
+  }
+
+  /* -------------------------------------------------------- permalinks --- */
+
+  function encodeSpec(spec) {
+    var o = {
+      s: spec.seed,
+      d: spec.depth,
+      w: spec.width,
+      g: +spec.gain.toFixed(3),
+      z: spec.z.map(function (v) { return +v.toFixed(3); }),
+      c: spec.scale,
+      l: +spec.sea.toFixed(3),
+      a: +spec.auth.toFixed(3),
+      r: +spec.rivers.toFixed(3),
+      m: spec.lineage.map(function (st) { return [st[0], +st[1].toFixed(3)]; })
+    };
+    return encodeURIComponent(JSON.stringify(o));
+  }
+
+  function decodeSpec(str) {
+    try {
+      var o = JSON.parse(decodeURIComponent(str));
+      var spec = NW.world.defaultSpec(String(o.s == null ? 'orpheus' : o.s));
+      if (o.d) spec.depth = clamp(o.d | 0, 1, 6);
+      if (o.w) spec.width = clamp(o.w | 0, 4, 64);
+      if (o.g) spec.gain = clamp(+o.g, 0.2, 4);
+      if (Array.isArray(o.z)) for (var i = 0; i < 4; i++) spec.z[i] = clamp(+o.z[i] || 0, -3, 3);
+      if (o.c) spec.scale = clamp(+o.c, 20, 4000);
+      if (o.l !== undefined) spec.sea = clamp(+o.l, -1, 1);
+      if (o.a !== undefined) spec.auth = clamp(+o.a, 0, 1);
+      if (o.r !== undefined) spec.rivers = clamp(+o.r, 0, 6);
+      if (Array.isArray(o.m)) {
+        spec.lineage = o.m.slice(0, 64).map(function (st) {
+          return [st[0] >>> 0, clamp(+st[1] || 0, 0, 2)];
+        });
+      }
+      return spec;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  NW.ui = {
+    crisp: crisp,
+    facts: facts,
+    actColor: actColor,
+    drawLoss: drawLoss,
+    drawProbs: drawProbs,
+    drawNet: drawNet,
+    drawMinimap: drawMinimap,
+    encodeSpec: encodeSpec,
+    decodeSpec: decodeSpec
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * main.js — application: camera, chunk streaming, evolution, input, wiring.
+ */
+(function (NW) {
+  'use strict';
+
+  var CHUNK = NW.world.CHUNK;
+  var clamp = NW.world.clamp;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var VIEWS = ['biome', 'elev', 'moist', 'temp', 'slope', 'hydro', 'flora', 'ore', 'neuron'];
+
+  var app = {
+    spec: null,
+    world: null,
+    trainer: null,
+    cam: { x: 0, y: 0, tilePx: 7 },
+    mode: 'biome',
+    opts: { decor: true, places: true, contours: false, grid: false, smooth: false },
+    probe: { layer: 0, neuron: 0 },
+    queue: [],
+    preview: null,
+    lowres: false,
+    drift: false,
+    driftT: 0,
+    hover: null,
+    hoverInfo: null,
+    candidates: [],
+    candQueue: [],
+    candJob: null,
+    mm: null,
+    mmJob: null,
+    keys: {},
+    fps: 0,
+    texSeed: 0,
+    basisKey: '',
+    perSample: 0,
+    missing: 0,
+    lastFrame: 0,
+    statTick: 0,
+    hoverTick: 0,
+    factTick: 0
+  };
+
+  var map = $('map');
+  var mctx = map.getContext('2d');
+  var dpr = 1;
+  var cssW = 0, cssH = 0;
+
+  /* --------------------------------------------------------------- boot --- */
+
+  function startTraining(seed, label) {
+    app.trainer = new NW.biome.Trainer(seed, {});
+    $('boot').classList.remove('gone');
+    $('boot').querySelector('.boot-sub').textContent = label;
+    $('bootFill').style.width = '0%';
+  }
+
+  function finishTraining() {
+    var t = app.trainer;
+    NW.ui.facts($('clsFacts'), [
+      ['topology', t.net.sizes.join(' → ')],
+      ['parameters', t.net.layers.reduce(function (a, l) { return a + l.w.length + l.b.length; }, 0)],
+      ['train samples', t.data.n],
+      ['final loss', t.loss.toFixed(4)],
+      ['oracle agreement', (t.accuracy * 100).toFixed(1) + '%']
+    ]);
+    NW.ui.drawLoss($('lossCanvas'), t);
+    $('boot').classList.add('gone');
+    rebuildWorld(true);
+  }
+
+  /* -------------------------------------------------------------- world --- */
+
+  /*
+   * Swap in a world for the current spec. `reuse` borrows the previous world's
+   * normalisation instead of re-measuring it — correct enough for a preview while
+   * a control is being dragged, and the difference is measured away on release.
+   */
+  function swapWorld(reuse) {
+    app.world = new NW.world.World(app.spec, app.trainer.net,
+      reuse && app.world ? app.world.norm() : null);
+    app.texSeed = NW.rand.hashString(app.world.key) ^ 0x5bf03635;
+  }
+
+  function rebuildWorld(alsoCandidates) {
+    swapWorld(false);
+    app.queue.length = 0;
+    /* Keep the old minimap on screen; the key check below rebuilds it in the
+     * background rather than blanking the HUD on every slider release. */
+    app.mmJob = null;
+    app.hoverInfo = null;
+    refreshNetFacts();
+    refreshProbeSelectors();
+    writeHash();
+    if (alsoCandidates) spawnCandidates();
+  }
+
+  function refreshNetFacts() {
+    var net = app.world.net;
+    var sizes = [NW.world.IN_DIM].concat(net.layers.map(function (l) { return l.outDim; }));
+    var counts = {};
+    for (var l = 0; l < net.layers.length - 1; l++) {
+      for (var j = 0; j < net.layers[l].outDim; j++) {
+        var nm = net.actName(l, j);
+        counts[nm] = (counts[nm] || 0) + 1;
+      }
+    }
+    var mix = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
+      .map(function (k) { return k + '×' + counts[k]; }).join(' ');
+    /* A chunk is uninterruptible work; past ~30ms it no longer fits in a frame
+     * and streaming visibly lags, so say so rather than letting it feel broken. */
+    var cost = perSampleMs() * CHUNK_SAMPLES;
+    NW.ui.facts($('netFacts'), [
+      ['topology', sizes.join(' → ')],
+      ['weights', net.weightCount()],
+      ['activations', mix],
+      ['mutation steps', app.spec.lineage.length],
+      ['chunk cost', cost.toFixed(1) + ' ms / ' + (CHUNK * CHUNK) + ' tiles' +
+        (cost > 30 ? ' — heavy' : ''), cost > 30 ? 'warn' : '']
+    ]);
+  }
+
+  function refreshProbeSelectors() {
+    var net = app.world.net;
+    var selL = $('selLayer'), selN = $('selNeuron');
+    var keepL = Math.min(app.probe.layer, net.layers.length - 2);
+    selL.innerHTML = '';
+    for (var l = 0; l < net.layers.length - 1; l++) {
+      var o = document.createElement('option');
+      o.value = l;
+      o.textContent = 'h' + (l + 1);
+      selL.appendChild(o);
+    }
+    app.probe.layer = Math.max(0, keepL);
+    selL.value = app.probe.layer;
+    var w = net.layers[app.probe.layer].outDim;
+    selN.innerHTML = '';
+    for (var j = 0; j < w; j++) {
+      var oo = document.createElement('option');
+      oo.value = j;
+      oo.textContent = '#' + j;
+      selN.appendChild(oo);
+    }
+    app.probe.neuron = Math.min(app.probe.neuron, w - 1);
+    selN.value = app.probe.neuron;
+  }
+
+  function writeHash() {
+    try {
+      history.replaceState(null, '', '#' + NW.ui.encodeSpec(app.spec));
+    } catch (e) { /* file:// can refuse replaceState; the app works regardless. */ }
+  }
+
+  /* ------------------------------------------------------------ drawing --- */
+
+  /*
+   * Measured when the stage actually changes size, not once a frame. Reading
+   * geometry every frame forces a synchronous layout of the whole document, and
+   * anything that dirties the panel — a slider label, a stat line — then makes
+   * that layout expensive. It cost 40ms a frame while dragging the latent vector.
+   */
+  function measureStage() {
+    var stage = map.parentNode;
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    cssW = Math.max(1, Math.floor(stage.clientWidth));
+    cssH = Math.max(1, Math.floor(stage.clientHeight));
+    if (map.width !== Math.round(cssW * dpr) || map.height !== Math.round(cssH * dpr)) {
+      map.width = Math.round(cssW * dpr);
+      map.height = Math.round(cssH * dpr);
+    }
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function watchStage() {
+    measureStage();
+    if (window.ResizeObserver) {
+      new ResizeObserver(measureStage).observe(map.parentNode);
+    } else {
+      window.addEventListener('resize', measureStage);
+    }
+  }
+
+  function viewport() {
+    var wT = cssW / app.cam.tilePx, hT = cssH / app.cam.tilePx;
+    return {
+      wTiles: wT, hTiles: hT,
+      left: app.cam.x - wT / 2, top: app.cam.y - hT / 2,
+      right: app.cam.x + wT / 2, bottom: app.cam.y + hT / 2
+    };
+  }
+
+  /*
+   * Coarse level of detail: one downsampled region standing in for the whole
+   * viewport. Used when zoomed out past the point where chunks could stream in,
+   * and while the latent vector or a terrain dial is being dragged.
+   *
+   * The result is cached with a margin around the viewport, so small pans reuse
+   * it instead of rebuilding.
+   */
+  var previewCanvas = document.createElement('canvas');
+  var PREVIEW_PAD = 0.16;
+
+  /*
+   * Every coarse-sampling budget in the app is expressed in milliseconds, not in
+   * samples, because the cost of a sample depends on the network the user chose:
+   * a 5x48 CPPN is six times the work of the default. Sizing these in samples
+   * meant the largest topology turned a 55ms preview into a 200ms one and a
+   * thumbnail into a 1.6-second freeze. The chunk timer is the calibration.
+   */
+  var CHUNK_SAMPLES = (CHUNK + 2) * (CHUNK + 2);
+
+  /*
+   * Calibrated only on chunk builds, which are a fixed size, and carried across
+   * world swaps because the cost per sample follows the topology rather than the
+   * world. Measuring it from the preview instead would be circular — the preview
+   * would size itself from its own last cost and drift.
+   */
+  function noteChunkCost(ms) {
+    var v = ms / CHUNK_SAMPLES;
+    app.perSample = app.perSample ? app.perSample * 0.7 + v * 0.3 : v;
+  }
+
+  function perSampleMs() {
+    return app.perSample || 17 / CHUNK_SAMPLES;
+  }
+
+  function samplesFor(ms, lo, hi) {
+    return clamp(Math.round(ms / perSampleMs()), lo, hi);
+  }
+
+  /*
+   * Two qualities. As a backdrop under chunks that have not arrived yet it is on
+   * screen for a few hundred milliseconds, so it is built cheap — its rebuild is
+   * the longest frame in a pan, and halving it halves that spike. When it *is*
+   * the picture — dragging a dial, animating z — it gets the full budget.
+   */
+  function previewPlan(vp, quality) {
+    /*
+     * The margin exists so a pan can reuse the cached preview. While a control is
+     * being dragged the camera is still, so the margin is pure waste — dropping it
+     * buys back a third of the samples and spends them on resolution instead.
+     */
+    var pad = quality === 'backdrop' ? PREVIEW_PAD : 0.02;
+    var tilesW = vp.wTiles * (1 + 2 * pad);
+    var tilesH = vp.hTiles * (1 + 2 * pad);
+    var area = tilesW * tilesH;
+
+    /*
+     * Budget in samples taken, not pixels produced, and never supersampled: the
+     * preview is only ever on screen while something is moving — a drag, a morph,
+     * terrain streaming in — and motion hides the aliasing that a still image
+     * would show. Spending the budget on resolution instead is the better trade,
+     * and it is four times the pixels for the same work. (The minimap and the
+     * offspring thumbnails are stills, and those do supersample.)
+     */
+    var samples = samplesFor(quality === 'backdrop' ? 13 : 45, 800, 30000);
+    /* Fractional, because rounding the step to an integer at these scales throws
+     * away up to half the budget — sqrt(area/samples) of 2.5 becomes 3. */
+    var step = Math.max(1, Math.sqrt(area / samples));
+    var w = Math.ceil(tilesW / step) + 1;
+    var h = Math.ceil(tilesH / step) + 1;
+    return {
+      quality: quality, step: step, sub: step, ss: 1, w: w, h: h,
+      x0: Math.floor((vp.left - vp.wTiles * pad) / step) * step,
+      y0: Math.floor((vp.top - vp.hTiles * pad) / step) * step
+    };
+  }
+
+  function drawPreview(vp, quality) {
+    var plan = previewPlan(vp, quality);
+    var p = app.preview;
+    var stale = !p || p.key !== app.world.key || p.quality !== plan.quality ||
+      p.step !== plan.step || p.ss !== plan.ss ||
+      vp.left < p.x0 || vp.top < p.y0 ||
+      vp.right > p.x0 + p.w * p.step || vp.bottom > p.y0 + p.h * p.step;
+
+    if (stale) {
+      var region = app.world.buildRegion(plan.x0, plan.y0, plan.w * plan.ss, plan.h * plan.ss, plan.sub);
+      NW.render.regionToCanvas(region, plan.ss, previewCanvas);
+      app.preview = p = {
+        key: app.world.key, quality: plan.quality, step: plan.step, ss: plan.ss,
+        w: plan.w, h: plan.h, x0: plan.x0, y0: plan.y0
+      };
+    }
+
+    mctx.imageSmoothingEnabled = true;
+    mctx.drawImage(previewCanvas,
+      (p.x0 - vp.left) * app.cam.tilePx, (p.y0 - vp.top) * app.cam.tilePx,
+      p.w * p.step * app.cam.tilePx, p.h * p.step * app.cam.tilePx);
+  }
+
+  function ensureChunks(vp) {
+    var c0x = Math.floor(vp.left / CHUNK), c1x = Math.floor(vp.right / CHUNK);
+    var c0y = Math.floor(vp.top / CHUNK), c1y = Math.floor(vp.bottom / CHUNK);
+    var wanted = [];
+    for (var cy = c0y; cy <= c1y; cy++) {
+      for (var cx = c0x; cx <= c1x; cx++) {
+        if (!app.world.getChunk(cx, cy)) {
+          var dx = (cx + 0.5) * CHUNK - app.cam.x, dy = (cy + 0.5) * CHUNK - app.cam.y;
+          wanted.push([cx, cy, dx * dx + dy * dy]);
+        }
+      }
+    }
+    /*
+     * Once everything on screen exists, spend the leftover budget on a one-chunk
+     * ring just outside the viewport, so panning reveals finished terrain instead
+     * of black squares.
+     */
+    if (!wanted.length) {
+      for (var py = c0y - 1; py <= c1y + 1; py++) {
+        for (var px = c0x - 1; px <= c1x + 1; px++) {
+          if (py > c0y - 1 && py < c1y + 1 && px > c0x - 1 && px < c1x + 1) continue;
+          if (!app.world.getChunk(px, py)) {
+            var pdx = (px + 0.5) * CHUNK - app.cam.x, pdy = (py + 0.5) * CHUNK - app.cam.y;
+            wanted.push([px, py, pdx * pdx + pdy * pdy]);
+          }
+        }
+      }
+    }
+    wanted.sort(function (a, b) { return a[2] - b[2]; });
+    app.queue = wanted;
+
+    /* Generate nearest-first inside a frame budget so panning never stalls. */
+    var t0 = performance.now();
+    while (app.queue.length && performance.now() - t0 < 11) {
+      var job = app.queue.shift();
+      app.world.makeChunk(job[0], job[1]);
+      noteChunkCost(app.world.genMs);
+    }
+
+    /* Count what is still missing on screen — the prefetch ring does not count. */
+    var missing = 0;
+    for (var my = c0y; my <= c1y; my++) {
+      for (var mx = c0x; mx <= c1x; mx++) if (!app.world.getChunk(mx, my)) missing++;
+    }
+    app.missing = missing;
+    return { c0x: c0x, c1x: c1x, c0y: c0y, c1y: c1y, missing: missing };
+  }
+
+  function drawWorld(vp) {
+    var range = ensureChunks(vp);
+    var tp = app.cam.tilePx;
+    var probeTag = app.mode === 'neuron' ? ('n' + app.probe.layer + '.' + app.probe.neuron) : '';
+
+    /*
+     * Anything not yet generated shows the coarse preview rather than a black
+     * square: pan into new territory and the map arrives blurred, then sharpens
+     * chunk by chunk. Only paid for while something is actually missing.
+     */
+    if (range.missing && app.mode === 'biome') drawPreview(vp, 'backdrop');
+
+    /*
+     * Changing the probed neuron invalidates every visible chunk's activation
+     * map at once. Re-running them all in one frame is a couple of hundred
+     * milliseconds, so they refresh a few per frame like everything else — the
+     * map ripples over to the new neuron instead of stopping dead.
+     */
+    var probeBudget = Math.max(1, Math.floor(samplesFor(11, 1, 40000) / CHUNK_SAMPLES));
+
+    mctx.imageSmoothingEnabled = !!app.opts.smooth;
+    for (var cy = range.c0y; cy <= range.c1y; cy++) {
+      for (var cx = range.c0x; cx <= range.c1x; cx++) {
+        var ox = (cx * CHUNK - vp.left) * tp;
+        var oy = (cy * CHUNK - vp.top) * tp;
+        var x = Math.round(ox), y = Math.round(oy);
+        var w = Math.round(ox + CHUNK * tp) - x;
+        var h = Math.round(oy + CHUNK * tp) - y;
+        var ch = app.world.getChunk(cx, cy);
+        if (!ch) {
+          if (app.mode !== 'biome') {
+            mctx.fillStyle = '#0a0e14';
+            mctx.fillRect(x, y, w, h);
+          }
+          continue;
+        }
+        if (app.mode === 'neuron' && ch.probeTag !== probeTag) {
+          if (probeBudget <= 0) continue;
+          probeBudget--;
+          ch.probe = app.world.probeNeuron(cx, cy, app.probe.layer, app.probe.neuron);
+          ch.probeTag = probeTag;
+          ch.rasterMode = null;
+        }
+        var raster = NW.render.rasterize(ch, app.mode, {
+          contours: app.opts.contours,
+          probeTag: probeTag,
+          seed: app.texSeed
+        });
+        mctx.drawImage(raster, 0, 0, CHUNK, CHUNK, x, y, w, h);
+      }
+    }
+
+    /* Overlays, back to front: props on the ground, then place markers on top. */
+    if (app.mode === 'biome' && (app.opts.decor || app.opts.places)) {
+      var bounds = { left: 0, top: 0, right: cssW, bottom: cssH };
+      for (var dy2 = range.c0y; dy2 <= range.c1y; dy2++) {
+        for (var dx2 = range.c0x; dx2 <= range.c1x; dx2++) {
+          var c2 = app.world.getChunk(dx2, dy2);
+          if (c2 && app.opts.decor) {
+            NW.render.drawDecor(mctx, app.world, c2,
+              (dx2 * CHUNK - vp.left) * tp, (dy2 * CHUNK - vp.top) * tp, tp, bounds);
+          }
+        }
+      }
+      if (app.opts.places && tp >= 3.5) {
+        for (var sy = range.c0y; sy <= range.c1y; sy++) {
+          for (var sx = range.c0x; sx <= range.c1x; sx++) {
+            var c3 = app.world.getChunk(sx, sy);
+            if (c3) {
+              NW.render.drawSites(mctx, c3,
+                (sx * CHUNK - vp.left) * tp, (sy * CHUNK - vp.top) * tp, tp, app.texSeed);
+            }
+          }
+        }
+      }
+    }
+
+    if (app.opts.grid) {
+      mctx.strokeStyle = 'rgba(120,180,200,0.28)';
+      mctx.lineWidth = 1;
+      mctx.font = '9px ui-monospace, monospace';
+      mctx.fillStyle = 'rgba(140,200,215,0.55)';
+      for (var gx = range.c0x; gx <= range.c1x + 1; gx++) {
+        var lx = Math.round((gx * CHUNK - vp.left) * tp) + 0.5;
+        mctx.beginPath(); mctx.moveTo(lx, 0); mctx.lineTo(lx, cssH); mctx.stroke();
+      }
+      for (var gy = range.c0y; gy <= range.c1y + 1; gy++) {
+        var ly = Math.round((gy * CHUNK - vp.top) * tp) + 0.5;
+        mctx.beginPath(); mctx.moveTo(0, ly); mctx.lineTo(cssW, ly); mctx.stroke();
+      }
+      for (var ty = range.c0y; ty <= range.c1y; ty++) {
+        for (var tx = range.c0x; tx <= range.c1x; tx++) {
+          mctx.fillText(tx + ',' + ty,
+            (tx * CHUNK - vp.left) * tp + 4, (ty * CHUNK - vp.top) * tp + 12);
+        }
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------ minimap --- */
+
+  /*
+   * The minimap covers 640 tiles — sixteen thousand samples, a third of a second
+   * of solid work. Doing that in one go stutters the whole app every time you pan
+   * far enough to need a new one, so it is built a band at a time into a back
+   * buffer, only in frames where no terrain chunk is waiting, and swapped in when
+   * complete. The visible minimap never goes blank and nothing ever stalls.
+   */
+  var MM_N = 128, MM_STEP = 5;
+  var MM_SPAN = MM_N * MM_STEP;
+
+  function mmBuffer() {
+    var cv = document.createElement('canvas');
+    cv.width = cv.height = MM_N;
+    /* The completed buffer is read back once for the blur; the hint keeps Chrome
+     * from warning and keeps the canvas on the CPU where the readback is cheap. */
+    return { cv: cv, ctx: cv.getContext('2d', { willReadFrequently: true }) };
+  }
+
+  var mmFront = mmBuffer();
+  var mmBack = mmBuffer();
+
+  function updateMinimap(vp) {
+    var wantX = Math.round(app.cam.x - MM_SPAN / 2);
+    var wantY = Math.round(app.cam.y - MM_SPAN / 2);
+
+    if (!app.mmJob) {
+      var stale = !app.mm || app.mm.key !== app.world.key ||
+        Math.abs(app.cam.x - (app.mm.x0 + MM_SPAN / 2)) > MM_SPAN * 0.2 ||
+        Math.abs(app.cam.y - (app.mm.y0 + MM_SPAN / 2)) > MM_SPAN * 0.2;
+      if (stale) app.mmJob = { x0: wantX, y0: wantY, row: 0, key: app.world.key };
+    }
+
+    if (app.mmJob && !app.missing && !app.lowres) {
+      var job = app.mmJob;
+      if (job.key !== app.world.key) {
+        app.mmJob = null;
+      } else {
+        var rows = Math.min(clamp(Math.round(samplesFor(12, 300, 6000) / MM_N), 2, 24),
+          MM_N - job.row);
+        var region = app.world.buildRegion(
+          job.x0, job.y0 + job.row * MM_STEP, MM_N, rows, MM_STEP);
+        var band = NW.render.regionToCanvas(region, 1, null, false);
+        mmBack.ctx.drawImage(band, 0, job.row);
+        job.row += rows;
+        if (job.row >= MM_N) {
+          /* Blur once at the end: banding a 3x3 filter would seam every band. */
+          NW.render.blurCanvas(mmBack.cv, mmBack.ctx);
+          var t = mmFront;
+          mmFront = mmBack;
+          mmBack = t;
+          app.mm = { x0: job.x0, y0: job.y0, key: job.key };
+          app.mmJob = null;
+        }
+      }
+    }
+
+    NW.ui.drawMinimap($('minimap'), mmFront.cv, app.mm, MM_SPAN, app.cam, vp);
+  }
+
+  /* ----------------------------------------------------------- evolution --- */
+
+  function spawnCandidates() {
+    var rnd = NW.rand.rng((NW.rand.hashString(app.world.key) ^ (app.spec.lineage.length * 2654435761)) >>> 0);
+    var sigma = parseFloat($('rngSigma').value);
+    app.candidates = [{ spec: NW.world.cloneSpec(app.spec), parent: true }];
+    for (var i = 0; i < 5; i++) {
+      var s = NW.world.cloneSpec(app.spec);
+      s.lineage.push([(rnd() * 4294967295) >>> 0, sigma]);
+      app.candidates.push({ spec: s, parent: false });
+    }
+    var g = $('gallery');
+    g.innerHTML = '';
+    app.candQueue = [];
+    app.candJob = null;
+    for (var c = 0; c < app.candidates.length; c++) {
+      var cv = document.createElement('canvas');
+      cv.width = CAND_PX;
+      cv.height = CAND_PX;
+      if (app.candidates[c].parent) {
+        cv.className = 'parent';
+        cv.title = 'current world (the parent)';
+      } else {
+        cv.title = 'adopt this mutation';
+      }
+      cv.dataset.idx = c;
+      g.appendChild(cv);
+      app.candidates[c].canvas = cv;
+      app.candQueue.push(c);
+    }
+  }
+
+  /*
+   * Thumbnails are centred on the camera and cover a couple of feature periods,
+   * supersampled 2x — a thumbnail you cannot tell apart from its siblings is
+   * useless for choosing a parent. That is 31k samples each, so like the minimap
+   * they are built a band at a time, with the band sized to the current cost of a
+   * sample. Each candidate measures its own statistics, at a third of the usual
+   * sample count: normalising a mutant against its parent's distribution would
+   * disguise exactly the change you are being asked to judge.
+   */
+  var CAND_PX = 88, CAND_SS = 2, CAND_NORM = 768;
+
+  function pumpCandidates() {
+    if (!app.candJob) {
+      if (!app.candQueue.length) return;
+      var cand = app.candidates[app.candQueue.shift()];
+      var span = cand.spec.scale * 2.4;
+      app.candJob = {
+        cand: cand,
+        world: new NW.world.World(cand.spec, app.trainer.net, null, CAND_NORM),
+        span: span,
+        sub: span / (CAND_PX * CAND_SS),
+        row: 0
+      };
+      return;   /* building the network and its statistics is this frame's share */
+    }
+
+    var job = app.candJob;
+    var n = CAND_PX * CAND_SS;
+    var rows = clamp(Math.round(samplesFor(14, 400, 20000) / n), CAND_SS, n);
+    rows -= rows % CAND_SS;                 /* keep bands aligned to the downsample */
+    rows = Math.min(Math.max(rows, CAND_SS), n - job.row);
+
+    var region = job.world.buildRegion(
+      Math.round(app.cam.x - job.span / 2),
+      Math.round(app.cam.y - job.span / 2) + job.row * job.sub,
+      n, rows, job.sub);
+    var band = NW.render.regionToCanvas(region, CAND_SS, null);
+    job.cand.canvas.getContext('2d').drawImage(band, 0, job.row / CAND_SS);
+
+    job.row += rows;
+    if (job.row >= n) app.candJob = null;
+  }
+
+  function adopt(idx) {
+    var cand = app.candidates[idx];
+    if (!cand || cand.parent) return;
+    app.spec = NW.world.cloneSpec(cand.spec);
+    rebuildWorld(true);
+  }
+
+  /* ------------------------------------------------------------ inspector --- */
+
+  function updateInspector() {
+    if (!app.hover) return;
+    var vp = viewport();
+    var wx = Math.floor(vp.left + app.hover.x / app.cam.tilePx);
+    var wy = Math.floor(vp.top + app.hover.y / app.cam.tilePx);
+    var info = app.world.probe(wx, wy);
+    app.hoverInfo = info;
+
+    var f = info.fields;
+    var best = 0;
+    for (var k = 1; k < info.probs.length; k++) if (info.probs[k] > info.probs[best]) best = k;
+    var B = NW.biome.BIOMES[best];
+
+    NW.ui.facts($('insFields'), [
+      ['tile', wx + ', ' + wy],
+      ['biome (argmax)', B.name],
+      ['confidence', (info.probs[best] * 100).toFixed(1) + '%'],
+      ['height', f.elev[0].toFixed(3) + '  (rel ' + f.hn[0].toFixed(3) + ')'],
+      ['moisture', f.moist[0].toFixed(3)],
+      ['temperature', f.temp[0].toFixed(3)],
+      ['slope', f.slope[0].toFixed(3)],
+      ['river', f.river[0].toFixed(3)],
+      ['flora / ore', f.flora[0].toFixed(2) + ' / ' + f.ore[0].toFixed(2)]
+    ]);
+    NW.ui.drawNet($('netCanvas'), app.world.net, info.trace);
+    NW.ui.drawProbs($('probCanvas'), info.probs);
+
+    var tip = $('tooltip');
+    tip.classList.remove('hidden');
+    tip.innerHTML = '<b>' + B.name + '</b> ' + (info.probs[best] * 100).toFixed(0) + '%<br>' +
+      'h ' + f.hn[0].toFixed(2) + '  m ' + f.moist[0].toFixed(2) +
+      '  t ' + f.temp[0].toFixed(2) + (f.river[0] > 0.2 ? '<br>river ' + f.river[0].toFixed(2) : '');
+    var tx = app.hover.x + 14, ty = app.hover.y + 14;
+    if (tx > cssW - 190) tx = app.hover.x - 176;
+    if (ty > cssH - 70) ty = app.hover.y - 62;
+    tip.style.left = tx + 'px';
+    tip.style.top = ty + 'px';
+  }
+
+  /* ---------------------------------------------------------------- loop --- */
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+
+    if (!app.trainer.done) {
+      var was = app.trainer.pump(14);
+      $('bootFill').style.width = (app.trainer.progress() * 100).toFixed(1) + '%';
+      $('bootStat').textContent = 'epoch ' + app.trainer.epoch + '/' + app.trainer.epochs +
+        '   loss ' + (app.trainer.loss ? app.trainer.loss.toFixed(4) : '—');
+      if (app.trainer.history.length) NW.ui.drawLoss($('lossCanvas'), app.trainer);
+      if (was) finishTraining();
+      return;
+    }
+    if (!app.world) return;
+
+    var dt = app.lastFrame ? Math.min(0.1, (now - app.lastFrame) / 1000) : 0.016;
+    app.lastFrame = now;
+    app.fps = app.fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
+
+    /* Keyboard pan, in screen pixels per second so it feels the same at any zoom. */
+    var pan = 620 * dt / app.cam.tilePx;
+    if (app.keys.w) app.cam.y -= pan;
+    if (app.keys.s) app.cam.y += pan;
+    if (app.keys.a) app.cam.x -= pan;
+    if (app.keys.d) app.cam.x += pan;
+
+    if (app.drift) {
+      app.driftT += dt * 0.13;
+      var t = app.driftT;
+      setZ([
+        Math.sin(t) * 1.1,
+        Math.sin(t * 0.73 + 1.1) * 1.1,
+        Math.cos(t * 0.51) * 0.9,
+        Math.sin(t * 0.37 + 2.2) * 0.9
+      ], true);
+    }
+
+    /*
+     * While a dial or the latent vector is moving, every cached chunk is already
+     * invalid, so there is nothing to stream — draw the coarse region only.
+     */
+    var vp = viewport();
+    mctx.clearRect(0, 0, cssW, cssH);
+    if (app.lowres) {
+      app.queue.length = 0;
+      drawPreview(vp, 'full');
+    } else {
+      drawWorld(vp);
+    }
+
+    updateMinimap(vp);
+    if (!app.lowres && !app.missing) {
+      /* Both wait for the map itself to be finished before spending a frame. */
+      if (app.basisKey !== basisKey()) buildBasisSheet();
+      else pumpCandidates();
+    }
+
+    if (app.hover && !app.lowres && now - app.hoverTick > 55) {
+      app.hoverTick = now;
+      updateInspector();
+    }
+
+    if (now - app.statTick > 120) {
+      app.statTick = now;
+      $('stats').textContent =
+        'fps ' + app.fps.toFixed(0) + '   chunks ' + app.world.chunks.size +
+        '   gen ' + (perSampleMs() * CHUNK_SAMPLES).toFixed(1) + 'ms\n' +
+        'zoom ' + app.cam.tilePx.toFixed(1) + 'px   weights ' + app.world.net.weightCount() +
+        '   queue ' + app.queue.length;
+      $('hudCoords').textContent =
+        'x ' + Math.round(app.cam.x) + '  y ' + Math.round(app.cam.y) +
+        '   ' + MM_SPAN + ' tiles across';
+      /* The measured chunk cost only exists after some chunks have been built. */
+      if (app.world.genCount && now - app.factTick > 900) {
+        app.factTick = now;
+        refreshNetFacts();
+      }
+    }
+  }
+
+  /* --------------------------------------------------------------- input --- */
+
+  /*
+   * `syncInputs` writes the values back into the range inputs — needed when drift
+   * or the jump button moved them, skipped when the user is dragging one, since
+   * writing to an input mid-drag dirties layout for no visible gain.
+   */
+  function setZ(z, syncInputs) {
+    app.spec.z = z;
+    for (var i = 0; i < 4; i++) {
+      if (syncInputs) $('z' + i).value = z[i];
+      $('vz' + i).textContent = z[i].toFixed(2);
+    }
+    swapWorld(app.drift || app.lowres);
+  }
+
+  /*
+   * Sliders apply live against a coarse preview while dragging, then commit to
+   * full-resolution chunks once the value settles. Terrain dials invalidate every
+   * cached chunk, so doing it the other way round would drop the framerate to a
+   * crawl.
+   *
+   * The end of a drag is detected by a quiet period, not by the `change` event:
+   * Chrome fires `change` on a range input on *every* drag step, not on release.
+   * Trusting it meant each step re-measured the world's statistics, respawned all
+   * six offspring, and flipped the preview between its two qualities — each flip
+   * invalidating the other's cache, so the preview rebuilt at full resolution
+   * every single frame. That alone was 90ms a frame on the latent sliders.
+   */
+  var COMMIT_MS = 200;
+  var commitTimer = null;
+
+  function beginInteraction() {
+    app.lowres = true;
+    if (commitTimer) clearTimeout(commitTimer);
+    commitTimer = setTimeout(endInteraction, COMMIT_MS);
+  }
+
+  function endInteraction() {
+    commitTimer = null;
+    if (app.drift) return;      /* drift owns lowres; there is nothing to settle */
+    app.lowres = false;
+    rebuildWorld(false);
+    spawnCandidates();
+  }
+
+  function bindSlider(id, label, fmt, apply) {
+    var el = $(id);
+    var lbl = $(label);
+    function live() {
+      var v = parseFloat(el.value);
+      lbl.textContent = fmt(v);
+      apply(v);
+      beginInteraction();
+    }
+    el.addEventListener('input', live);
+    el.addEventListener('change', live);
+    lbl.textContent = fmt(parseFloat(el.value));
+  }
+
+  function wire() {
+    /* seed + topology */
+    $('seedInput').addEventListener('change', function () {
+      app.spec.seed = $('seedInput').value || 'orpheus';
+      app.spec.lineage = [];
+      rebuildWorld(true);
+    });
+    $('seedDice').addEventListener('click', newBrain);
+    $('btnEvolve').addEventListener('click', function () {
+      /* Take the first mutant straight away — the impatient path through evolution. */
+      adopt(1);
+    });
+    $('selDepth').addEventListener('change', function () {
+      app.spec.depth = parseInt(this.value, 10);
+      app.spec.lineage = [];
+      rebuildWorld(true);
+    });
+    $('selWidth').addEventListener('change', function () {
+      app.spec.width = parseInt(this.value, 10);
+      app.spec.lineage = [];
+      rebuildWorld(true);
+    });
+
+    bindSlider('rngGain', 'vGain', function (v) { return v.toFixed(2); }, function (v) {
+      app.spec.gain = v;
+      app.spec.lineage = [];
+      swapWorld(app.lowres);
+    });
+    bindSlider('rngScale', 'vScale', function (v) { return String(v | 0); }, function (v) {
+      app.spec.scale = v;
+      swapWorld(app.lowres);
+    });
+    bindSlider('rngSea', 'vSea', function (v) { return v.toFixed(2); }, function (v) {
+      app.spec.sea = v;
+      swapWorld(app.lowres);
+    });
+    bindSlider('rngAuth', 'vAuth', function (v) { return (v * 100).toFixed(0) + '%'; }, function (v) {
+      app.spec.auth = v;
+      swapWorld(app.lowres);
+    });
+    bindSlider('rngRivers', 'vRivers', function (v) { return v.toFixed(2); }, function (v) {
+      app.spec.rivers = v;
+      swapWorld(app.lowres);
+    });
+    bindSlider('rngSigma', 'vSigma', function (v) { return v.toFixed(2); }, function () {});
+
+    for (var i = 0; i < 4; i++) {
+      (function (k) {
+        var el = $('z' + k);
+        el.addEventListener('input', function () {
+          var z = app.spec.z.slice();
+          z[k] = parseFloat(el.value);
+          setZ(z, false);
+          beginInteraction();
+        });
+      })(i);
+    }
+
+    $('btnRandZ').addEventListener('click', function () {
+      var rnd = NW.rand.rng((Math.abs(app.cam.x * 7919 + app.cam.y * 104729) | 0) ^ (app.spec.lineage.length + 17));
+      setZ([0, 1, 2, 3].map(function () { return +(rnd() * 2.6 - 1.3).toFixed(2); }), true);
+      rebuildWorld(false);
+      spawnCandidates();
+    });
+
+    $('btnDrift').addEventListener('click', toggleDrift);
+
+    $('btnSpawn').addEventListener('click', spawnCandidates);
+    $('btnBack').addEventListener('click', function () {
+      if (!app.spec.lineage.length) return;
+      app.spec.lineage.pop();
+      rebuildWorld(true);
+    });
+    $('gallery').addEventListener('click', function (e) {
+      if (e.target.dataset && e.target.dataset.idx !== undefined) adopt(parseInt(e.target.dataset.idx, 10));
+    });
+
+    $('selView').addEventListener('change', function () {
+      app.mode = this.value;
+      $('neuronPick').classList.toggle('hidden', app.mode !== 'neuron');
+    });
+    $('selLayer').addEventListener('change', function () {
+      app.probe.layer = parseInt(this.value, 10);
+      app.basisKey = '';
+      var w = app.world.net.layers[app.probe.layer].outDim;
+      var selN = $('selNeuron');
+      selN.innerHTML = '';
+      for (var j = 0; j < w; j++) {
+        var o = document.createElement('option');
+        o.value = j;
+        o.textContent = '#' + j;
+        selN.appendChild(o);
+      }
+      app.probe.neuron = Math.min(app.probe.neuron, w - 1);
+      selN.value = app.probe.neuron;
+    });
+    $('selNeuron').addEventListener('change', function () {
+      app.probe.neuron = parseInt(this.value, 10);
+      markBasisSelection();
+    });
+
+    $('basis').addEventListener('click', function (e) {
+      if (!e.target.dataset || e.target.dataset.neuron === undefined) return;
+      app.probe.neuron = parseInt(e.target.dataset.neuron, 10);
+      $('selNeuron').value = app.probe.neuron;
+      markBasisSelection();
+      /* Clicking a tile is a request to look at it, so show it on the map. */
+      app.mode = 'neuron';
+      $('selView').value = 'neuron';
+      $('neuronPick').classList.remove('hidden');
+    });
+
+    $('chkDecor').addEventListener('change', function () { app.opts.decor = this.checked; });
+    $('chkPlaces').addEventListener('change', function () { app.opts.places = this.checked; });
+    $('chkGrid').addEventListener('change', function () { app.opts.grid = this.checked; });
+    $('chkSmooth').addEventListener('change', function () { app.opts.smooth = this.checked; });
+    $('chkContours').addEventListener('change', function () {
+      app.opts.contours = this.checked;
+      app.world.chunks.forEach(function (c) { c.rasterMode = null; });
+    });
+
+    $('btnRetrain').addEventListener('click', function () {
+      startTraining((NW.rand.hashString(String(Date.now())) ^ 0x33) >>> 0, 'Retraining the biome network');
+    });
+
+    $('btnLink').addEventListener('click', function () {
+      writeHash();
+      var url = location.href;
+      /* Clipboard and prompt are both blocked in some embeddings; the hash is
+       * updated either way, so degrade quietly rather than throwing. */
+      function fallback() {
+        try { window.prompt('Permalink:', url); } catch (e) { /* sandboxed */ }
+        flash();
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(flash, fallback);
+        } else {
+          fallback();
+        }
+      } catch (e) {
+        fallback();
+      }
+    });
+
+    $('btnPng').addEventListener('click', function () {
+      var a = document.createElement('a');
+      a.download = 'neuroworld-' + app.spec.seed + '-' + Math.round(app.cam.x) + '_' + Math.round(app.cam.y) + '.png';
+      a.href = map.toDataURL('image/png');
+      a.click();
+    });
+
+    $('btnPanel').addEventListener('click', function () { $('panel').classList.toggle('open'); });
+
+    /* First-run hint: goes on the first real interaction, or after a while. */
+    var hintGone = false;
+    function dropHint() {
+      if (hintGone) return;
+      hintGone = true;
+      $('hint').classList.add('gone');
+    }
+    $('hintClose').addEventListener('click', dropHint);
+    map.addEventListener('pointerdown', dropHint);
+    map.addEventListener('wheel', dropHint, { passive: true });
+    window.addEventListener('keydown', dropHint);
+    setTimeout(dropHint, 16000);
+
+    /* Zoom buttons: the only way to zoom on a touch screen, handy on a trackpad. */
+    function zoomBy(f) { app.cam.tilePx = clamp(app.cam.tilePx * f, 3, 34); }
+    $('zoomIn').addEventListener('click', function () { zoomBy(1.35); });
+    $('zoomOut').addEventListener('click', function () { zoomBy(1 / 1.35); });
+
+    /* mouse / touch */
+    var dragging = false, lastX = 0, lastY = 0, moved = 0;
+    map.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      moved = 0;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      map.classList.add('dragging');
+      map.setPointerCapture(e.pointerId);
+    });
+    map.addEventListener('pointermove', function (e) {
+      var r = map.getBoundingClientRect();
+      app.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+      if (dragging) {
+        var dx = e.clientX - lastX, dy = e.clientY - lastY;
+        moved += Math.abs(dx) + Math.abs(dy);
+        app.cam.x -= dx / app.cam.tilePx;
+        app.cam.y -= dy / app.cam.tilePx;
+        lastX = e.clientX;
+        lastY = e.clientY;
+      }
+    });
+    function endDrag() {
+      dragging = false;
+      map.classList.remove('dragging');
+    }
+    map.addEventListener('pointerup', endDrag);
+    map.addEventListener('pointercancel', endDrag);
+    map.addEventListener('pointerleave', function () {
+      app.hover = null;
+      $('tooltip').classList.add('hidden');
+    });
+
+    map.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var r = map.getBoundingClientRect();
+      var mx = e.clientX - r.left, my = e.clientY - r.top;
+      var vp = viewport();
+      var wx = vp.left + mx / app.cam.tilePx;
+      var wy = vp.top + my / app.cam.tilePx;
+      var f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0016));
+      app.cam.tilePx = clamp(app.cam.tilePx * f, 3, 34);
+      /* Keep the tile under the cursor pinned. */
+      var vp2 = { wTiles: cssW / app.cam.tilePx, hTiles: cssH / app.cam.tilePx };
+      app.cam.x = wx - (mx / app.cam.tilePx) + vp2.wTiles / 2;
+      app.cam.y = wy - (my / app.cam.tilePx) + vp2.hTiles / 2;
+    }, { passive: false });
+
+    $('minimap').addEventListener('click', function (e) {
+      if (!app.mm) return;
+      var r = this.getBoundingClientRect();
+      app.cam.x = app.mm.x0 + ((e.clientX - r.left) / r.width) * MM_SPAN;
+      app.cam.y = app.mm.y0 + ((e.clientY - r.top) / r.height) * MM_SPAN;
+    });
+
+    window.addEventListener('keydown', function (e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      var k = e.key.toLowerCase();
+      /* A focused button fires its own click on space; do not toggle twice. */
+      if (k === ' ' && e.target.tagName === 'BUTTON') return;
+      if (k === 'w' || k === 'arrowup') app.keys.w = true;
+      if (k === 's' || k === 'arrowdown') app.keys.s = true;
+      if (k === 'a' || k === 'arrowleft') app.keys.a = true;
+      if (k === 'd' || k === 'arrowright') app.keys.d = true;
+      if (k === 'r') newBrain();
+      if (k === 'n') adopt(1);
+      if (k === 'g') { $('chkGrid').checked = !$('chkGrid').checked; app.opts.grid = $('chkGrid').checked; }
+      if (k === 'm') {
+        var i = (VIEWS.indexOf(app.mode) + 1) % VIEWS.length;
+        app.mode = VIEWS[i];
+        $('selView').value = app.mode;
+        $('neuronPick').classList.toggle('hidden', app.mode !== 'neuron');
+      }
+      if (k === ' ') { e.preventDefault(); toggleDrift(); }
+      if (k === '+' || k === '=') app.cam.tilePx = clamp(app.cam.tilePx * 1.2, 3, 34);
+      if (k === '-') app.cam.tilePx = clamp(app.cam.tilePx / 1.2, 3, 34);
+    });
+    window.addEventListener('keyup', function (e) {
+      var k = e.key.toLowerCase();
+      if (k === 'w' || k === 'arrowup') app.keys.w = false;
+      if (k === 's' || k === 'arrowdown') app.keys.s = false;
+      if (k === 'a' || k === 'arrowleft') app.keys.a = false;
+      if (k === 'd' || k === 'arrowright') app.keys.d = false;
+    });
+  }
+
+  function flash() {
+    var b = $('btnLink');
+    b.classList.add('on');
+    setTimeout(function () { b.classList.remove('on'); }, 700);
+  }
+
+  function toggleDrift() {
+    app.drift = !app.drift;
+    app.lowres = app.drift;
+    $('btnDrift').classList.toggle('on', app.drift);
+    if (!app.drift) {
+      rebuildWorld(false);
+      spawnCandidates();
+    }
+  }
+
+  function newBrain() {
+    var words = ['orpheus', 'kalyx', 'vesper', 'tundra', 'ossian', 'mirren', 'halcyon',
+      'cinder', 'quillon', 'sable', 'lumen', 'thalos', 'nyx', 'perigee', 'brackish'];
+    var rnd = NW.rand.rng((performance.now() * 1000) | 0);
+    var seed = words[(rnd() * words.length) | 0] + '-' + ((rnd() * 46656) | 0).toString(36);
+    $('seedInput').value = seed;
+    app.spec.seed = seed;
+    app.spec.lineage = [];
+    rebuildWorld(true);
+  }
+
+  /*
+   * The contact sheet: every neuron of the probed layer over the same patch of
+   * map. This is the closest the app gets to showing what the network *is* —
+   * the terrain is a weighted sum of these pictures, and mutating a weight
+   * changes how much of one of them ends up in the ground under your cursor.
+   *
+   * One forward pass produces all of them, so the whole sheet costs about what a
+   * single chunk does. The activation buffer it returns belongs to the network
+   * and is reused by the next forward pass, so it is drained here and now.
+   */
+  var BASIS_PX = 40;
+
+  function buildBasisSheet() {
+    var layer = app.probe.layer;
+    var net = app.world.net;
+    var step = Math.max(1, Math.round(app.spec.scale * 1.6 / BASIS_PX));
+    var g = app.world.probeLayerGrid(
+      Math.round(app.cam.x - BASIS_PX * step / 2),
+      Math.round(app.cam.y - BASIS_PX * step / 2),
+      BASIS_PX, step, layer);
+
+    var host = $('basis');
+    host.innerHTML = '';
+    var ramp = NW.render.RAMPS.neuron;
+    var tmp = [0, 0, 0];
+    for (var j = 0; j < g.oD; j++) {
+      var cv = document.createElement('canvas');
+      cv.width = cv.height = BASIS_PX;
+      var ctx = cv.getContext('2d');
+      var img = ctx.createImageData(BASIS_PX, BASIS_PX);
+      for (var i = 0; i < BASIS_PX * BASIS_PX; i++) {
+        ramp(g.act[i * g.oD + j] * 0.5 + 0.5, tmp);
+        img.data[i * 4] = tmp[0];
+        img.data[i * 4 + 1] = tmp[1];
+        img.data[i * 4 + 2] = tmp[2];
+        img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      cv.dataset.neuron = j;
+      cv.title = '#' + j + '   ' + net.actName(layer, j);
+      if (j === app.probe.neuron) cv.className = 'sel';
+      host.appendChild(cv);
+    }
+    $('basisLayer').textContent = 'h' + (layer + 1);
+    app.basisKey = basisKey();
+  }
+
+  function basisKey() {
+    return app.world.key + '|' + app.probe.layer + '|' +
+      Math.round(app.cam.x / 200) + ',' + Math.round(app.cam.y / 200);
+  }
+
+  function markBasisSelection() {
+    var kids = $('basis').children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].className = (+kids[i].dataset.neuron === app.probe.neuron) ? 'sel' : '';
+    }
+  }
+
+  function buildLegend() {
+    var html = '';
+    for (var i = 0; i < NW.biome.BIOMES.length; i++) {
+      var bm = NW.biome.BIOMES[i];
+      html += '<div><i style="background:rgb(' + bm.rgb.join(',') + ')"></i>' +
+        '<span>' + bm.name + '</span></div>';
+    }
+    $('legend').innerHTML = html;
+  }
+
+  /* ---------------------------------------------------------------- init --- */
+
+  function init() {
+    var fromHash = location.hash.length > 2 ? NW.ui.decodeSpec(location.hash.slice(1)) : null;
+    app.spec = fromHash || NW.world.defaultSpec($('seedInput').value || 'orpheus');
+    $('seedInput').value = app.spec.seed;
+    $('selDepth').value = String(app.spec.depth);
+    $('selWidth').value = String(app.spec.width);
+    $('rngGain').value = app.spec.gain;
+    $('rngScale').value = app.spec.scale;
+    $('rngSea').value = app.spec.sea;
+    $('rngAuth').value = app.spec.auth;
+    $('rngRivers').value = app.spec.rivers;
+    for (var i = 0; i < 4; i++) {
+      $('z' + i).value = app.spec.z[i];
+      $('vz' + i).textContent = app.spec.z[i].toFixed(2);
+    }
+    wire();
+    watchStage();
+    buildLegend();
+    NW.ui.drawNet($('netCanvas'), null, null);
+    startTraining(1337, 'Training the biome network');
+    requestAnimationFrame(frame);
+  }
+
+  /* Exposed for the console: NW.app.spec, NW.app.world, NW.app.trainer. */
+  NW.app = app;
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})(window.NW = window.NW || {});
+</script>
+</body>
+</html>

@@ -1,6 +1,11 @@
 /* NeuroWorld — dark instrument-panel styling. No external fonts or assets. */
 
 :root {
+  /* The page commits to one visual world — a dark instrument panel around a map
+     that is its own light source — so the form controls and scrollbars are told
+     to match rather than following the host's theme into a white sliver. */
+  color-scheme: dark;
+
   --bg: #0a0d12;
   --bg2: #111721;
   --line: #1e2836;
