@@ -16,7 +16,7 @@
     trainer: null,
     cam: { x: 0, y: 0, tilePx: 7 },
     mode: 'biome',
-    opts: { decor: true, contours: false, grid: false, smooth: false },
+    opts: { decor: true, places: true, contours: false, grid: false, smooth: false },
     probe: { layer: 0, neuron: 0 },
     queue: [],
     preview: null,
@@ -27,9 +27,12 @@
     hoverInfo: null,
     candidates: [],
     candQueue: [],
-    minimap: null,
+    mm: null,
+    mmJob: null,
     keys: {},
     fps: 0,
+    texSeed: 0,
+    missing: 0,
     lastFrame: 0,
     statTick: 0,
     hoverTick: 0,
@@ -68,8 +71,11 @@
 
   function rebuildWorld(alsoCandidates) {
     app.world = new NW.world.World(app.spec, app.trainer.net);
+    app.texSeed = NW.rand.hashString(app.world.key) ^ 0x5bf03635;
     app.queue.length = 0;
-    app.minimap = null;
+    /* Keep the old minimap on screen; the key check below rebuilds it in the
+     * background rather than blanking the HUD on every slider release. */
+    app.mmJob = null;
     app.hoverInfo = null;
     refreshNetFacts();
     refreshProbeSelectors();
@@ -165,25 +171,33 @@
   var previewCanvas = document.createElement('canvas');
   var PREVIEW_PAD = 0.16;
 
-  function previewPlan(vp) {
+  /*
+   * Two qualities. As a backdrop under chunks that have not arrived yet it is on
+   * screen for a few hundred milliseconds, so it is built cheap — its rebuild is
+   * the longest frame in a pan, and halving it halves that spike. When it *is*
+   * the picture — dragging a dial, animating z — it gets the full budget.
+   */
+  function previewPlan(vp, quality) {
     var tilesW = vp.wTiles * (1 + 2 * PREVIEW_PAD);
     var tilesH = vp.hTiles * (1 + 2 * PREVIEW_PAD);
-    var step = Math.max(1, Math.round(Math.sqrt(tilesW * tilesH / 6000)));
-    var ss = step >= 4 ? 2 : 1;
+    var target = quality === 'backdrop' ? 2600 : 6000;
+    var step = Math.max(1, Math.round(Math.sqrt(tilesW * tilesH / target)));
+    var ss = (quality !== 'backdrop' && step >= 4) ? 2 : 1;
     var sub = step / ss;
     var w = Math.ceil(tilesW / step) + 1;
     var h = Math.ceil(tilesH / step) + 1;
     return {
-      step: step, sub: sub, ss: ss, w: w, h: h,
+      quality: quality, step: step, sub: sub, ss: ss, w: w, h: h,
       x0: Math.floor((vp.left - vp.wTiles * PREVIEW_PAD) / step) * step,
       y0: Math.floor((vp.top - vp.hTiles * PREVIEW_PAD) / step) * step
     };
   }
 
-  function drawPreview(vp) {
-    var plan = previewPlan(vp);
+  function drawPreview(vp, quality) {
+    var plan = previewPlan(vp, quality);
     var p = app.preview;
-    var stale = !p || p.key !== app.world.key || p.step !== plan.step || p.ss !== plan.ss ||
+    var stale = !p || p.key !== app.world.key || p.quality !== plan.quality ||
+      p.step !== plan.step || p.ss !== plan.ss ||
       vp.left < p.x0 || vp.top < p.y0 ||
       vp.right > p.x0 + p.w * p.step || vp.bottom > p.y0 + p.h * p.step;
 
@@ -191,7 +205,7 @@
       var region = app.world.buildRegion(plan.x0, plan.y0, plan.w * plan.ss, plan.h * plan.ss, plan.sub);
       NW.render.regionToCanvas(region, plan.ss, previewCanvas);
       app.preview = p = {
-        key: app.world.key, step: plan.step, ss: plan.ss,
+        key: app.world.key, quality: plan.quality, step: plan.step, ss: plan.ss,
         w: plan.w, h: plan.h, x0: plan.x0, y0: plan.y0
       };
     }
@@ -245,6 +259,7 @@
     for (var my = c0y; my <= c1y; my++) {
       for (var mx = c0x; mx <= c1x; mx++) if (!app.world.getChunk(mx, my)) missing++;
     }
+    app.missing = missing;
     return { c0x: c0x, c1x: c1x, c0y: c0y, c1y: c1y, missing: missing };
   }
 
@@ -258,7 +273,7 @@
      * square: pan into new territory and the map arrives blurred, then sharpens
      * chunk by chunk. Only paid for while something is actually missing.
      */
-    if (range.missing && app.mode === 'biome') drawPreview(vp);
+    if (range.missing && app.mode === 'biome') drawPreview(vp, 'backdrop');
 
     mctx.imageSmoothingEnabled = !!app.opts.smooth;
     for (var cy = range.c0y; cy <= range.c1y; cy++) {
@@ -283,20 +298,33 @@
         }
         var raster = NW.render.rasterize(ch, app.mode, {
           contours: app.opts.contours,
-          probeTag: probeTag
+          probeTag: probeTag,
+          seed: app.texSeed
         });
         mctx.drawImage(raster, 0, 0, CHUNK, CHUNK, x, y, w, h);
       }
     }
 
-    if (app.opts.decor && app.mode === 'biome') {
+    /* Overlays, back to front: props on the ground, then place markers on top. */
+    if (app.mode === 'biome' && (app.opts.decor || app.opts.places)) {
       var bounds = { left: 0, top: 0, right: cssW, bottom: cssH };
       for (var dy2 = range.c0y; dy2 <= range.c1y; dy2++) {
         for (var dx2 = range.c0x; dx2 <= range.c1x; dx2++) {
           var c2 = app.world.getChunk(dx2, dy2);
-          if (c2) {
+          if (c2 && app.opts.decor) {
             NW.render.drawDecor(mctx, app.world, c2,
               (dx2 * CHUNK - vp.left) * tp, (dy2 * CHUNK - vp.top) * tp, tp, bounds);
+          }
+        }
+      }
+      if (app.opts.places && tp >= 3.5) {
+        for (var sy = range.c0y; sy <= range.c1y; sy++) {
+          for (var sx = range.c0x; sx <= range.c1x; sx++) {
+            var c3 = app.world.getChunk(sx, sy);
+            if (c3) {
+              NW.render.drawSites(mctx, c3,
+                (sx * CHUNK - vp.left) * tp, (sy * CHUNK - vp.top) * tp, tp, app.texSeed);
+            }
           }
         }
       }
@@ -326,19 +354,55 @@
 
   /* ------------------------------------------------------------ minimap --- */
 
-  var MM_SAMPLES = 176, MM_STEP = 4;
+  /*
+   * The minimap covers 640 tiles — sixteen thousand samples, a third of a second
+   * of solid work. Doing that in one go stutters the whole app every time you pan
+   * far enough to need a new one, so it is built a band at a time into a back
+   * buffer, only in frames where no terrain chunk is waiting, and swapped in when
+   * complete. The visible minimap never goes blank and nothing ever stalls.
+   */
+  var MM_N = 128, MM_STEP = 5, MM_BAND = 8;
+  var MM_SPAN = MM_N * MM_STEP;
+
+  var mmFront = document.createElement('canvas');
+  var mmBack = document.createElement('canvas');
+  mmFront.width = mmFront.height = mmBack.width = mmBack.height = MM_N;
 
   function updateMinimap(vp) {
-    var span = MM_SAMPLES * MM_STEP;
-    var need = !app.minimap ||
-      Math.abs(app.cam.x - (app.minimap.x0 + span / 2)) > span * 0.22 ||
-      Math.abs(app.cam.y - (app.minimap.y0 + span / 2)) > span * 0.22;
-    if (need && !app.lowres) {
-      var x0 = Math.round(app.cam.x - span / 2);
-      var y0 = Math.round(app.cam.y - span / 2);
-      app.minimap = app.world.buildRegion(x0, y0, MM_SAMPLES, MM_SAMPLES, MM_STEP);
+    var wantX = Math.round(app.cam.x - MM_SPAN / 2);
+    var wantY = Math.round(app.cam.y - MM_SPAN / 2);
+
+    if (!app.mmJob) {
+      var stale = !app.mm || app.mm.key !== app.world.key ||
+        Math.abs(app.cam.x - (app.mm.x0 + MM_SPAN / 2)) > MM_SPAN * 0.2 ||
+        Math.abs(app.cam.y - (app.mm.y0 + MM_SPAN / 2)) > MM_SPAN * 0.2;
+      if (stale) app.mmJob = { x0: wantX, y0: wantY, row: 0, key: app.world.key };
     }
-    NW.ui.drawMinimap($('minimap'), app.minimap, app.cam, vp);
+
+    if (app.mmJob && !app.missing && !app.lowres) {
+      var job = app.mmJob;
+      if (job.key !== app.world.key) {
+        app.mmJob = null;
+      } else {
+        var rows = Math.min(MM_BAND, MM_N - job.row);
+        var region = app.world.buildRegion(
+          job.x0, job.y0 + job.row * MM_STEP, MM_N, rows, MM_STEP);
+        var band = NW.render.regionToCanvas(region, 1, null, false);
+        mmBack.getContext('2d').drawImage(band, 0, job.row);
+        job.row += rows;
+        if (job.row >= MM_N) {
+          /* Blur once at the end: banding a 3x3 filter would seam every band. */
+          NW.render.blurCanvas(mmBack);
+          var t = mmFront;
+          mmFront = mmBack;
+          mmBack = t;
+          app.mm = { x0: job.x0, y0: job.y0, key: job.key };
+          app.mmJob = null;
+        }
+      }
+    }
+
+    NW.ui.drawMinimap($('minimap'), mmFront, app.mm, MM_SPAN, app.cam, vp);
   }
 
   /* ----------------------------------------------------------- evolution --- */
@@ -487,13 +551,14 @@
     mctx.clearRect(0, 0, cssW, cssH);
     if (app.lowres) {
       app.queue.length = 0;
-      drawPreview(vp);
+      drawPreview(vp, 'full');
     } else {
       drawWorld(vp);
     }
 
     updateMinimap(vp);
-    if (!app.lowres) pumpCandidates();
+    /* Thumbnails are ~100ms each; they wait until the map itself is complete. */
+    if (!app.lowres && !app.missing) pumpCandidates();
 
     if (app.hover && !app.lowres && now - app.hoverTick > 55) {
       app.hoverTick = now;
@@ -509,7 +574,7 @@
         '   queue ' + app.queue.length;
       $('hudCoords').textContent =
         'x ' + Math.round(app.cam.x) + '  y ' + Math.round(app.cam.y) +
-        '   ' + (MM_SAMPLES * MM_STEP) + ' tiles across';
+        '   ' + MM_SPAN + ' tiles across';
       /* The measured chunk cost only exists after some chunks have been built. */
       if (app.world.genCount && now - app.factTick > 900) {
         app.factTick = now;
@@ -529,7 +594,7 @@
     /* Reuse the normalisation while animating; it is re-measured when z settles. */
     app.world = new NW.world.World(app.spec, app.trainer.net,
       app.drift && app.world ? app.world.lut : null);
-    app.minimap = null;
+    app.texSeed = NW.rand.hashString(app.world.key) ^ 0x5bf03635;
   }
 
   /*
@@ -585,27 +650,22 @@
       app.spec.gain = v;
       app.spec.lineage = [];
       app.world = new NW.world.World(app.spec, app.trainer.net);
-      app.minimap = null;
     });
     bindSlider('rngScale', 'vScale', function (v) { return String(v | 0); }, function (v) {
       app.spec.scale = v;
       app.world = new NW.world.World(app.spec, app.trainer.net);
-      app.minimap = null;
     });
     bindSlider('rngSea', 'vSea', function (v) { return v.toFixed(2); }, function (v) {
       app.spec.sea = v;
       app.world = new NW.world.World(app.spec, app.trainer.net);
-      app.minimap = null;
     });
     bindSlider('rngAuth', 'vAuth', function (v) { return (v * 100).toFixed(0) + '%'; }, function (v) {
       app.spec.auth = v;
       app.world = new NW.world.World(app.spec, app.trainer.net);
-      app.minimap = null;
     });
     bindSlider('rngRivers', 'vRivers', function (v) { return v.toFixed(2); }, function (v) {
       app.spec.rivers = v;
       app.world = new NW.world.World(app.spec, app.trainer.net);
-      app.minimap = null;
     });
     bindSlider('rngSigma', 'vSigma', function (v) { return v.toFixed(2); }, function () {});
 
@@ -668,6 +728,7 @@
     });
 
     $('chkDecor').addEventListener('change', function () { app.opts.decor = this.checked; });
+    $('chkPlaces').addEventListener('change', function () { app.opts.places = this.checked; });
     $('chkGrid').addEventListener('change', function () { app.opts.grid = this.checked; });
     $('chkSmooth').addEventListener('change', function () { app.opts.smooth = this.checked; });
     $('chkContours').addEventListener('change', function () {
@@ -697,6 +758,19 @@
     });
 
     $('btnPanel').addEventListener('click', function () { $('panel').classList.toggle('open'); });
+
+    /* First-run hint: goes on the first real interaction, or after a while. */
+    var hintGone = false;
+    function dropHint() {
+      if (hintGone) return;
+      hintGone = true;
+      $('hint').classList.add('gone');
+    }
+    $('hintClose').addEventListener('click', dropHint);
+    map.addEventListener('pointerdown', dropHint);
+    map.addEventListener('wheel', dropHint, { passive: true });
+    window.addEventListener('keydown', dropHint);
+    setTimeout(dropHint, 16000);
 
     /* Zoom buttons: the only way to zoom on a touch screen, handy on a trackpad. */
     function zoomBy(f) { app.cam.tilePx = clamp(app.cam.tilePx * f, 3, 34); }
@@ -752,16 +826,17 @@
     }, { passive: false });
 
     $('minimap').addEventListener('click', function (e) {
-      if (!app.minimap) return;
+      if (!app.mm) return;
       var r = this.getBoundingClientRect();
-      var span = MM_SAMPLES * MM_STEP;
-      app.cam.x = app.minimap.x0 + ((e.clientX - r.left) / r.width) * span;
-      app.cam.y = app.minimap.y0 + ((e.clientY - r.top) / r.height) * span;
+      app.cam.x = app.mm.x0 + ((e.clientX - r.left) / r.width) * MM_SPAN;
+      app.cam.y = app.mm.y0 + ((e.clientY - r.top) / r.height) * MM_SPAN;
     });
 
     window.addEventListener('keydown', function (e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       var k = e.key.toLowerCase();
+      /* A focused button fires its own click on space; do not toggle twice. */
+      if (k === ' ' && e.target.tagName === 'BUTTON') return;
       if (k === 'w' || k === 'arrowup') app.keys.w = true;
       if (k === 's' || k === 'arrowdown') app.keys.s = true;
       if (k === 'a' || k === 'arrowleft') app.keys.a = true;
@@ -815,6 +890,16 @@
     rebuildWorld(true);
   }
 
+  function buildLegend() {
+    var html = '';
+    for (var i = 0; i < NW.biome.BIOMES.length; i++) {
+      var bm = NW.biome.BIOMES[i];
+      html += '<div><i style="background:rgb(' + bm.rgb.join(',') + ')"></i>' +
+        '<span>' + bm.name + '</span></div>';
+    }
+    $('legend').innerHTML = html;
+  }
+
   /* ---------------------------------------------------------------- init --- */
 
   function init() {
@@ -833,6 +918,7 @@
       $('vz' + i).textContent = app.spec.z[i].toFixed(2);
     }
     wire();
+    buildLegend();
     NW.ui.drawNet($('netCanvas'), null, null);
     startTraining(1337, 'Training the biome network');
     requestAnimationFrame(frame);

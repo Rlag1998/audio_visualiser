@@ -11,8 +11,8 @@
 
   var IN_DIM = 16;      /* see encodePoint below */
   var OUT_DIM = 6;      /* elevation, moisture, temperature, river, flora, ore */
-  var CHUNK = 48;       /* tiles per chunk edge */
-  var MAX_CHUNKS = 200; /* LRU ceiling; ~18 MB of fields and rasters */
+  var CHUNK = 32;       /* tiles per chunk edge */
+  var MAX_CHUNKS = 400; /* LRU ceiling; ~17 MB of fields and rasters */
   var AUX = 4;          /* noise channels kept for the authority blend */
 
   var LIGHT = [-0.55, -0.70, 0.45];
@@ -431,8 +431,18 @@
           var dist = Math.abs(rivG[gi]) / rmag;
           /* Widen a little when sampling coarsely so rivers stay visible on the
            * minimap, but cap it — unclamped, a step-9 overview turns all blue. */
-          var width = (0.55 + (1 - hn) * 0.85) * p.rivers * Math.min(step, 2.5);
-          river = clamp(1 - dist / width, 0, 1) * clamp((moist - 0.14) * 3, 0, 1);
+          var width = (0.8 + (1 - hn) * 0.9) * p.rivers * Math.min(step, 2.5);
+          /*
+           * Every zero-crossing of the channel is a watercourse, and there are far
+           * more of them than a map at this scale should draw — left ungated they
+           * cover the continent in a uniform net of threads that reads as contour
+           * lines. Two smooth gates fix it without touching the geometry: rivers
+           * run where it rains, and they fade with altitude, so what survives is
+           * drainage basins with trunks in the lowlands.
+           */
+          river = clamp(1 - dist / width, 0, 1) *
+            clamp((moist - 0.38) * 6, 0, 1) *
+            clamp(1.25 - hn * 1.1, 0, 1);
         }
 
         /* Lambertian hillshade, normalised so flat ground sits at 1.0. */
@@ -495,6 +505,7 @@
     f.cy = cy;
     f.raster = null;
     f.rasterMode = null;
+    f.sites = null;
     this.chunks.set(this.chunkKey(cx, cy), f);
     while (this.chunks.size > MAX_CHUNKS) {
       var oldest = this.chunks.keys().next().value;

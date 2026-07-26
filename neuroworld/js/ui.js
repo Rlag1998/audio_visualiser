@@ -199,25 +199,23 @@
 
   /* ------------------------------------------------------------ minimap --- */
 
-  function drawMinimap(canvas, region, cam, view) {
+  function drawMinimap(canvas, src, origin, span, cam, view) {
     var ctx = canvas.getContext('2d');
     var W = canvas.width, H = canvas.height;
     ctx.fillStyle = '#0b0f16';
     ctx.fillRect(0, 0, W, H);
-    if (!region) return;
-    if (!region._img) region._img = NW.render.regionToCanvas(region, 1, null, true);
+    if (!origin) return;
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(region._img, 0, 0, W, H);
+    ctx.drawImage(src, 0, 0, W, H);
 
     /* Viewport rectangle, in minimap pixels. */
-    var tilesW = region.w * region.step, tilesH = region.h * region.step;
-    var sx = W / tilesW, sy = H / tilesH;
-    var vx = (cam.x - view.wTiles / 2 - region.x0) * sx;
-    var vy = (cam.y - view.hTiles / 2 - region.y0) * sy;
+    var s = W / span;
+    var vx = (cam.x - view.wTiles / 2 - origin.x0) * s;
+    var vy = (cam.y - view.hTiles / 2 - origin.y0) * s;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 1;
     ctx.strokeRect(Math.round(vx) + 0.5, Math.round(vy) + 0.5,
-      Math.max(3, view.wTiles * sx), Math.max(3, view.hTiles * sy));
+      Math.max(3, view.wTiles * s), Math.max(3, view.hTiles * s));
   }
 
   /* -------------------------------------------------------- permalinks --- */

@@ -73,6 +73,13 @@
   </div>
 
   <div id="tooltip" class="hidden"></div>
+
+  <div id="hint">
+    <span><b>Hover</b> anywhere to trace the network's forward pass for that tile</span>
+    <span><b>N</b> breeds a mutated world &middot; <b>M</b> cycles nine views &middot; <b>R</b> rolls a new brain</span>
+    <span>Drag <b>network authority</b> to 0% to see the plain noise underneath</span>
+    <button id="hintClose" title="Dismiss">&times;</button>
+  </div>
 </main>
 
 <aside id="panel">
@@ -158,6 +165,7 @@
     </label>
     <div class="row toggles">
       <label><input id="chkDecor" type="checkbox" checked> props</label>
+      <label><input id="chkPlaces" type="checkbox" checked> places</label>
       <label><input id="chkContours" type="checkbox"> contours</label>
       <label><input id="chkGrid" type="checkbox"> chunk grid</label>
       <label><input id="chkSmooth" type="checkbox"> smooth</label>
@@ -174,6 +182,15 @@
     <canvas id="lossCanvas" width="288" height="66"></canvas>
     <div id="clsFacts" class="facts"></div>
     <button id="btnRetrain" class="btn wide">retrain with a new init</button>
+  </section>
+
+  <section>
+    <h2>Legend</h2>
+    <p class="hint">
+      Sixteen classes. What you see on the map is a probability-weighted blend of
+      these, not a pick from them.
+    </p>
+    <div id="legend"></div>
   </section>
 
   <section>

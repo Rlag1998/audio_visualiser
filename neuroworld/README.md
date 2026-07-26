@@ -19,6 +19,10 @@ biomes with an if-chain. NeuroWorld replaces both halves with neural networks:
 And because the terrain is weights, worlds can be **bred**. Every mutation step is a
 seed, so an evolved planet is reproducible from a URL.
 
+Settlements are read out of the same six channels — fresh water, workable ground,
+flora, ore, a tolerable climate — and named after whatever earned them the site, so
+river towns come out as fords and headlands as havens.
+
 ## Try this first
 
 1. Open it and wait ~2 seconds for the biome network to train.
@@ -34,6 +38,9 @@ seed, so an evolved planet is reproducible from a URL.
 5. Click an **offspring** thumbnail, then another, then another. That is interactive
    evolution: each is the parent's weights plus gaussian noise, with the odd
    activation function swapped. Hit **link** and the whole lineage is in the URL.
+6. Zoom in past ~8 px/tile and the ground grows props and place names. Nothing there
+   is decoration for its own sake — every tree, cactus and town is a threshold on one
+   of the network's channels.
 
 ## Controls
 
@@ -69,7 +76,7 @@ CPPN  16 → 24 → 24 → 24 → 6      random weights, per-neuron activation, 
 biome MLP  5 → 20 → 18 → 16      trained in-browser against a rule oracle
    │
    ▼
-softmax → blended palette → hillshade → tiles + props
+softmax → blended palette → hillshade → tiles → props, settlements
 ```
 
 ### Three problems worth knowing about
@@ -93,14 +100,33 @@ supersample 2× before downscaling. Zoomed-out maps, the minimap and the offspri
 thumbnails all go through that path — a thumbnail you cannot tell apart from its
 siblings is useless for choosing a parent.
 
-### Streaming
+**Every zero-crossing of the river channel is a watercourse, and there are far more
+of them than a map should draw.** Ungated they cover the continent in a uniform net
+of threads that reads as contour lines rather than water. Two smooth gates fix it
+without touching the geometry — rivers run where it rains, and they fade with
+altitude — leaving drainage basins with their trunks in the lowlands.
 
-Terrain is generated in 48×48 tile chunks, nearest-first, inside an 11 ms per-frame
-budget, with a one-chunk prefetch ring beyond the viewport and an LRU cap of 200
-chunks. Anything not yet generated shows the coarse preview instead of a black
-square, so panning into new territory arrives blurred and then sharpens. A chunk
-costs ~30 ms: 2500 CPPN forward passes, 2500 classifications, gradients, hillshade
-and rasterisation.
+### Staying at 60 fps
+
+Terrain is generated in 32×32 tile chunks, nearest-first, inside an 11 ms per-frame
+budget, with a one-chunk prefetch ring beyond the viewport and an LRU cap of 400
+chunks. A chunk costs ~17 ms — 1156 CPPN forward passes, 1024 classifications,
+gradients, hillshade and rasterisation — and that number is the reason chunks are
+this size: work that cannot be interrupted has to be small enough to fit in a frame.
+
+Everything else expensive is deferred or sliced rather than done when convenient:
+
+- Chunks not yet generated show the coarse preview instead of a black square, so
+  panning into new territory arrives blurred and then sharpens. As a backdrop the
+  preview is built at less than half the resolution it gets when it *is* the picture,
+  because its rebuild is otherwise the longest frame in a pan.
+- The minimap is 16k samples, a third of a second of work. It is built eight rows at
+  a time into a back buffer, only in frames where no chunk is waiting, and swapped in
+  when complete — so it never blanks and never stalls.
+- Offspring thumbnails (~100 ms each) wait until the visible map is finished.
+
+Measured while dragging the map continuously for six seconds: median frame 16.7 ms,
+p90 18.7 ms, p99 34.5 ms, worst 43.8 ms, nothing over 100 ms.
 
 ### Reproducibility
 
@@ -118,7 +144,7 @@ in a fresh tab.
 | `js/nn.js` | the CPPN (batched forward, mutation, tracing) and the trainable MLP (Adam, backprop) |
 | `js/biome.js` | 16 biomes, the rule oracle, dataset synthesis, time-sliced trainer |
 | `js/world.js` | features, normalisation, hypsometry, rivers, slope, shading, chunk cache |
-| `js/render.js` | chunk rasters, colour ramps, coarse LOD downsampling, props |
+| `js/render.js` | chunk rasters, colour ramps, coarse LOD downsampling, props, settlements |
 | `js/ui.js` | loss curve, biome bars, network diagram, minimap, permalinks |
 | `js/main.js` | camera, streaming, evolution, input, wiring |
 
@@ -134,6 +160,8 @@ Plain scripts and one stylesheet — it runs from `file://` with no toolchain.
   elevation and its crossings land on the shoreline; the generator measures that
   correlation per world and subtracts it, which is what makes rivers cut inland. They
   still do not always run downhill, and they neither merge nor reach the sea reliably.
+- Settlements are sites, not simulation: there are no roads between them, no
+  populations, and nothing stops two neighbours from sharing a valley.
 - No pinch-to-zoom; touch users get the HUD zoom buttons.
 - Animating the latent vector regenerates the visible region every frame and runs
   around 30 fps at a coarse sampling. That is the intended cost of a live morph.

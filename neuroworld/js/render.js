@@ -61,6 +61,8 @@
   function rasterize(chunk, mode, opts) {
     var tag = mode + '|' + (opts.contours ? 'c' : '') + (opts.probeTag || '');
     if (chunk.raster && chunk.rasterMode === tag) return chunk.raster;
+    var seed = opts.seed || 0;
+    var bx = chunk.cx * CHUNK, by = chunk.cy * CHUNK;
 
     var cv = chunk.raster || document.createElement('canvas');
     cv.width = CHUNK;
@@ -86,7 +88,12 @@
           r += (DEEP[0] - r) * k;
           g += (DEEP[1] - g) * k;
           b += (DEEP[2] - b) * k;
-          if (hn > -0.022) { r += 26; g += 30; b += 26; }
+          /* Shallows: a soft lift over the last of the depth, squared so it fades
+           * out rather than ending on a line. Keep it gentle — at full strength it
+           * reads as a cyan contour drawn around every coast. */
+          var surf = clamp(1 + hn / 0.04, 0, 1);
+          surf *= surf;
+          r += 15 * surf; g += 17 * surf; b += 11 * surf;
           var ice = clamp((0.14 - chunk.temp[i]) * 8, 0, 1);
           if (ice > 0) {
             r += (ICE[0] - r) * ice;
@@ -96,6 +103,14 @@
         } else {
           var sh = chunk.shade[i];
           if (chunk.river[i] > 0.45) sh = 1 + (sh - 1) * 0.3;
+          /*
+           * Fine grain. Without it a grassland is a flat slab of one colour at
+           * high zoom; a per-tile hash nudged by the flora channel gives the
+           * ground a weave without inventing any structure that is not there.
+           */
+          var tx = i % CHUNK, ty = (i / CHUNK) | 0;
+          sh *= 0.965 + NW.rand.hash2f(bx + tx, by + ty, seed) * 0.07 +
+            (chunk.flora[i] - 0.5) * 0.05;
           r *= sh; g *= sh; b *= sh;
         }
       } else if (mode === 'elev') {
@@ -269,6 +284,151 @@
     }
   }
 
+  /* ---------------------------------------------------------- settlements --- */
+
+  /*
+   * Places are read out of the same six channels the terrain is made of: fresh
+   * water, workable ground, flora to live off, ore to dig, a tolerable climate.
+   * One candidate per 44-tile cell, its position fixed by a hash of the cell
+   * coordinates, accepted or rejected by the score — so a settlement belongs to
+   * exactly one cell and never depends on which chunks happen to be loaded.
+   *
+   * The name is chosen from the terrain that earned the site its score, which is
+   * why river towns are fords and headlands are havens.
+   */
+  var CELL = 34;
+
+  var SYL_A = ['bar', 'cal', 'dun', 'el', 'far', 'gor', 'hal', 'ith', 'kel', 'mor',
+    'nor', 'ost', 'pel', 'ryn', 'sal', 'thar', 'ul', 'ven', 'wyn', 'yar', 'aske', 'brin'];
+  var SYL_B = ['bry', 'dor', 'gan', 'hem', 'lin', 'mar', 'nes', 'rid', 'sten',
+    'thal', 'vor', 'wick', 'gath', 'mel'];
+  var SUFFIX = {
+    river: ['ford', 'mere', 'bridge', 'weir'],
+    coast: ['port', 'haven', 'bay', 'strand'],
+    high: ['fell', 'crag', 'scar', 'heights'],
+    wood: ['holt', 'wood', 'glade', 'thicket'],
+    dry: ['reach', 'waste', 'well', 'span'],
+    plain: ['stead', 'ton', 'field', 'march', 'garth']
+  };
+
+  function placeName(seed, kind) {
+    var rnd = NW.rand.rng(seed);
+    var s = SYL_A[(rnd() * SYL_A.length) | 0];
+    if (rnd() < 0.45) s += SYL_B[(rnd() * SYL_B.length) | 0];
+    var list = SUFFIX[kind] || SUFFIX.plain;
+    s += list[(rnd() * list.length) | 0];
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  /* Is open water within a few tiles? Sampled inside the chunk only. */
+  function nearWater(chunk, tx, ty, radius) {
+    for (var a = 0; a < 12; a++) {
+      var ang = a / 12 * Math.PI * 2;
+      var qx = (tx + Math.cos(ang) * radius) | 0;
+      var qy = (ty + Math.sin(ang) * radius) | 0;
+      if (qx < 0 || qy < 0 || qx >= CHUNK || qy >= CHUNK) continue;
+      if (chunk.hn[qy * CHUNK + qx] < 0) return true;
+    }
+    return false;
+  }
+
+  function computeSites(chunk, seed) {
+    var sites = [];
+    var bx = chunk.cx * CHUNK, by = chunk.cy * CHUNK;
+    var g0x = Math.floor(bx / CELL), g1x = Math.floor((bx + CHUNK - 1) / CELL);
+    var g0y = Math.floor(by / CELL), g1y = Math.floor((by + CHUNK - 1) / CELL);
+
+    for (var gy = g0y; gy <= g1y; gy++) {
+      for (var gx = g0x; gx <= g1x; gx++) {
+        var h = NW.rand.hash2(gx, gy, seed);
+        var wx = gx * CELL + (h % CELL);
+        var wy = gy * CELL + (((h / CELL) | 0) % CELL);
+        var tx = wx - bx, ty = wy - by;
+        if (tx < 0 || ty < 0 || tx >= CHUNK || ty >= CHUNK) continue;
+
+        var i = ty * CHUNK + tx;
+        var hn = chunk.hn[i];
+        if (hn < 0.004 || hn > 0.62) continue;
+        var slope = chunk.slope[i];
+        if (slope > 0.62) continue;
+
+        var river = chunk.river[i] > 0.2;
+        var coast = nearWater(chunk, tx, ty, 5);
+        var temp = chunk.temp[i];
+        var score =
+          (river ? 0.34 : 0) +
+          (coast ? 0.24 : 0) +
+          chunk.flora[i] * 0.26 +
+          chunk.ore[i] * 0.16 +
+          (1 - slope) * 0.18 +
+          (1 - Math.abs(temp - 0.55) * 2) * 0.2 +
+          chunk.moist[i] * 0.1;
+        if (score < 0.58) continue;
+
+        var bi = chunk.biome[i];
+        var kind = river ? 'river' : (coast ? 'coast'
+          : (hn > 0.34 ? 'high'
+            : (bi === 9 || bi === 10 || bi === 11 ? 'wood'
+              : (chunk.moist[i] < 0.25 ? 'dry' : 'plain'))));
+
+        sites.push({
+          tx: tx, ty: ty,
+          rank: score > 1.0 ? 2 : (score > 0.8 ? 1 : 0),
+          name: placeName(h ^ 0x5f3a, kind)
+        });
+      }
+    }
+    return sites;
+  }
+
+  function drawSites(ctx, chunk, ox, oy, tilePx, seed) {
+    if (!chunk.sites || chunk.sitesSeed !== seed) {
+      chunk.sites = computeSites(chunk, seed);
+      chunk.sitesSeed = seed;
+    }
+    if (!chunk.sites.length) return;
+    var labels = tilePx >= 5.5;
+    ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+
+    for (var s = 0; s < chunk.sites.length; s++) {
+      var site = chunk.sites[s];
+      var px = ox + (site.tx + 0.5) * tilePx;
+      var py = oy + (site.ty + 0.5) * tilePx;
+      var rad = 2.6 + site.rank * 1.6;
+
+      ctx.fillStyle = 'rgba(12,16,22,0.85)';
+      ctx.beginPath();
+      ctx.arc(px, py, rad + 1.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = site.rank === 2 ? '#f2e3c0' : (site.rank === 1 ? '#e0d3b4' : '#c3bda9');
+      ctx.beginPath();
+      if (site.rank === 2) {
+        /* Cities get a ringed marker so the hierarchy reads at a glance. */
+        ctx.arc(px, py, rad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(12,16,22,0.85)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(px, py, rad - 2.2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.arc(px, py, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (labels) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(8,11,16,0.9)';
+        ctx.strokeText(site.name, px, py - rad - 5);
+        ctx.fillStyle = site.rank ? '#f4ecd8' : '#d8d2c2';
+        ctx.fillText(site.name, px, py - rad - 5);
+      }
+    }
+    ctx.textAlign = 'left';
+  }
+
   /* ---------------------------------------------------------- coarse LOD --- */
 
   /*
@@ -300,6 +460,14 @@
         }
       }
     }
+  }
+
+  /* Box-blur a canvas in place. Used once on a completed minimap. */
+  function blurCanvas(cv) {
+    var ctx = cv.getContext('2d');
+    var img = ctx.getImageData(0, 0, cv.width, cv.height);
+    boxBlur(img.data, cv.width, cv.height);
+    ctx.putImageData(img, 0, 0);
   }
 
   function regionToCanvas(region, ss, out, blur) {
@@ -342,6 +510,8 @@
     RAMPS: RAMPS,
     rasterize: rasterize,
     drawDecor: drawDecor,
-    regionToCanvas: regionToCanvas
+    drawSites: drawSites,
+    regionToCanvas: regionToCanvas,
+    blurCanvas: blurCanvas
   };
 })(window.NW = window.NW || {});

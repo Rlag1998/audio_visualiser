@@ -15,7 +15,7 @@
     { id: 0, name: 'Abyssal Ocean', rgb: [11, 38, 74] },
     { id: 1, name: 'Ocean', rgb: [18, 68, 118] },
     { id: 2, name: 'Shelf Sea', rgb: [44, 116, 164] },
-    { id: 3, name: 'River', rgb: [70, 138, 178] },
+    { id: 3, name: 'River', rgb: [66, 126, 163] },
     { id: 4, name: 'Beach', rgb: [219, 205, 163] },
     { id: 5, name: 'Desert', rgb: [216, 190, 138] },
     { id: 6, name: 'Steppe', rgb: [186, 177, 131] },
