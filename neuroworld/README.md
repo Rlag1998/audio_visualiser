@@ -8,8 +8,9 @@ biomes with an if-chain. NeuroWorld replaces both halves with neural networks:
 - **The terrain is a network's output.** A CPPN — a compositional pattern producing
   network with random weights and a random activation function per neuron — is
   evaluated at every tile coordinate. Its six output channels *are* elevation,
-  moisture, temperature, rivers, flora and minerals. Nothing is stored; the map is
-  unbounded in every direction because it is a pure function of position.
+  moisture, temperature, rivers, flora and minerals. Nothing is precomputed and
+  nothing is persisted — the map is unbounded in every direction because it is a
+  pure function of position.
 - **The biomes are a network's classification.** A small MLP trains in your tab,
   with Adam and cross-entropy, to read those fields and answer with a probability
   distribution over 16 biomes. You watch the loss come down before the first frame
@@ -43,9 +44,9 @@ river towns come out as fords and headlands as havens.
 5. Click an **offspring** thumbnail, then another, then another. That is interactive
    evolution: each is the parent's weights plus gaussian noise, with the odd
    activation function swapped. Hit **link** and the whole lineage is in the URL.
-6. Zoom in past ~8 px/tile and the ground grows props and place names. Nothing there
-   is decoration for its own sake — every tree, cactus and town is a threshold on one
-   of the network's channels.
+6. Zoom in. Place names appear around 6 px/tile, props on the ground past 8. None of
+   it is decoration for its own sake — every tree, cactus and town is a threshold on
+   one of the network's channels.
 
 ## Controls
 
@@ -89,7 +90,7 @@ biome MLP  5 → 20 → 18 → 16      trained in-browser against a rule oracle
 softmax → blended palette → hillshade → tiles → props, settlements
 ```
 
-### Three problems worth knowing about
+### Four problems worth knowing about
 
 **A random deep network's output is not usable as-is.** Stacked tanh piles its mass
 at ±1, so the raw elevation channel gives a planet that is all abyss and all
@@ -105,10 +106,12 @@ bunches around 0.5, which silently deleted every mountain and abyss at authority
 marginal distribution is identical at every setting.
 
 **Point-sampling a world with detail at a few tiles per cycle aliases into
-confetti.** Coarse views drop the noise octaves below their own Nyquist limit and
-supersample 2× before downscaling. Zoomed-out maps, the minimap and the offspring
-thumbnails all go through that path — a thumbnail you cannot tell apart from its
-siblings is useless for choosing a parent.
+confetti.** Every coarse view drops the noise octaves below its own Nyquist limit,
+and the ones that are *still* images — the minimap, the offspring thumbnails — also
+supersample 2× before downscaling. A thumbnail you cannot tell apart from its
+siblings is useless for choosing a parent. The viewport preview skips the
+supersampling on purpose: it is only ever shown while something is moving, and
+motion hides aliasing that resolution would have had to fix.
 
 **Every zero-crossing of the river channel is a watercourse, and there are far more
 of them than a map should draw.** Ungated they cover the continent in a uniform net
