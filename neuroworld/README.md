@@ -26,9 +26,37 @@ mutation shrinking each generation so the line converges on what you keep pickin
 Every mutation step is a seed and a whole tournament serialises to one ~50-byte
 lineage entry, so an evolved planet is reproducible from a URL.
 
-Settlements are read out of the same six channels — fresh water, workable ground,
-flora, ore, a tolerable climate — and named after whatever earned them the site, so
-river towns come out as fords and headlands as havens.
+And on top of the terrain sits a **derived civilisation** — nothing simulated,
+nothing stored, everything a pure function of the ground:
+
+- **Settlements** score their sites from the six channels — fresh water, workable
+  ground, flora, ore, a tolerable climate.
+- **Cultures** are the regional terrain: coastal regions raise Tidefolk, highlands
+  Cragfolk, deserts Duneborn, wetlands Mirefolk, tundra Frostkin, plains
+  Heartlanders. Each family owns a phoneme bank, so every person, clan, deity,
+  town and nation in a region sounds related.
+- **Nations** form around the best town of each province; every other town swears
+  to the capital *cheapest to reach over real terrain*, so borders fall on
+  mountains and straits by construction.
+- **Religions** worship what the land actually offers — sea, peaks, rivers, fire,
+  forest, sky — with rites answering the climate's real scarcities and taboos to
+  match.
+- **Clans, people, families**: three generations per leading clan, patronymics
+  running through them in the culture's own formula, ages consistent with the
+  world's calendar.
+- **Artifacts** are made of the materials the town really has (volcanic glass,
+  walrus ivory, heart-oak), by the clan whose craft fits, for the faith the
+  nation really holds — and never predate their town.
+- **Trade** flows between complementary neighbours, and **roads** are pathfound
+  over the actual ground: they climb passes, bridge rivers, and turn into dashed
+  ferry lines over water.
+- **History** is annotation of geography: wars happen at the pass or strait
+  between neighbouring capitals, floods to low river capitals, ash-years to
+  volcanic ones.
+
+Click any town for its dossier. Ask about a town a million tiles away and its
+founding year, patron deity and ruling clans are already decided — they follow
+from the ground it stands on.
 
 ## Try this first
 
@@ -54,9 +82,10 @@ river towns come out as fords and headlands as havens.
    winners, a final crowns its champion, and the next generation is the champion
    kept unchanged plus three crossbreeds of the winners plus two mutants, with
    mutation decaying 20% per generation. Adopt the champion whenever you're happy.
-6. Zoom in. Place names appear around 6 px/tile, props on the ground past 8. None of
-   it is decoration for its own sake — every tree, cactus and town is a threshold on
-   one of the network's channels.
+6. Zoom in. Place names appear around 6 px/tile, props past 8, and roads thread
+   between the towns. **Click any town**: its dossier opens — nation, culture,
+   faith, clans, three generations of named people, treasures, trade partners and
+   the nation's chronicle, all derived, all consistent with the terrain around it.
 
 ## Controls
 
@@ -177,6 +206,25 @@ tournament the UI offers — six individuals, three duels, a final, breed, repea
   entry round-trips through the permalink (`evo-test.js` in the session notes;
   the browser test clicks through two real generations and compares field hashes).
 
+### The civilisation is audited, not asserted
+
+`civ-test.js` treats "all coherent" as a falsifiable claim and checks it:
+
+- dossiers are bit-identical across independent world instances;
+- towns in the same region share a culture family 77% of the time vs 55% across
+  distant regions;
+- 6/6 sampled nations worship something their capital's terrain actually has;
+- 64/64 sampled names decompose over their culture's phoneme bank;
+- ages are ordered, every patronymic resolves to a named parent, artifacts fall
+  within their town's lifetime;
+- no trade partner sends a good the town already exports;
+- chronicles are sorted, bounded by the current year, and wars are named for the
+  real terrain at the midpoint between the capitals;
+- roads are deterministic (including argument order — the first version wasn't:
+  the A* route from A to B could differ from B to A on equal-cost ties, so the
+  computation is canonicalised), end at their towns, and beat the straight line
+  on both terrain cost and water crossed, 12/12.
+
 ### Reproducibility
 
 A world is entirely described by `{seed, depth, width, gain, lineage, z, scale, sea,
@@ -194,6 +242,7 @@ in a fresh tab.
 | `js/rng.js` | seeded PRNG, gaussians, hash-gradient Perlin noise, fbm, ridged fbm |
 | `js/nn.js` | the CPPN (batched forward, mutation, crossover, tracing) and the trainable MLP (Adam, backprop) |
 | `js/evo.js` | tournament genetics: population, breeding, deterministic replay from picks |
+| `js/civ.js` | the derived civilisation: cultures, nations, faiths, clans, people, artifacts, trade, roads, chronicles |
 | `js/biome.js` | 16 biomes, the rule oracle, dataset synthesis, time-sliced trainer |
 | `js/world.js` | features, normalisation, hypsometry, rivers, slope, shading, chunk cache |
 | `js/render.js` | chunk rasters, colour ramps, coarse LOD downsampling, props, settlements |
@@ -213,8 +262,9 @@ Plain scripts and one stylesheet — it runs from `file://` with no toolchain.
   elevation and its crossings land on the shoreline; the generator measures that
   correlation per world and subtracts it, which is what makes rivers cut inland. They
   still do not always run downhill, and they neither merge nor reach the sea reliably.
-- Settlements are sites, not simulation: there are no roads between them, no
-  populations, and nothing stops two neighbours from sharing a valley.
+- The civilisation is derived, not simulated: no one is born, nothing burns down,
+  and the chronicle never gains a new entry. That is the trade that keeps it
+  infinite, lazy and reproducible from a URL — the same trade the terrain makes.
 - On touch screens: pinch zooms, drag pans, a tap inspects the tile under your
   finger, and the tournament was designed around thumb-sized targets.
 - Animating the latent vector regenerates the whole visible region every frame, at

@@ -29,6 +29,10 @@
     candQueue: [],
     candJob: null,
     tour: null,
+    civMisses: [],
+    civQueued: null,
+    civRoadQueue: [],
+    dossier: null,
     mm: null,
     mmJob: null,
     keys: {},
@@ -86,6 +90,8 @@
 
   function rebuildWorld(alsoCandidates) {
     swapWorld(false);
+    app.civQueued = null;
+    if (app.dossier) closeDossier();
     app.queue.length = 0;
     /* Keep the old minimap on screen; the key check below rebuilds it in the
      * background rather than blanking the HUD on every slider release. */
@@ -391,7 +397,7 @@
       }
     }
 
-    /* Overlays, back to front: props on the ground, then place markers on top. */
+    /* Overlays, back to front: props, then roads, then place markers on top. */
     if (app.mode === 'biome' && (app.opts.decor || app.opts.places)) {
       var bounds = { left: 0, top: 0, right: cssW, bottom: cssH };
       for (var dy2 = range.c0y; dy2 <= range.c1y; dy2++) {
@@ -404,12 +410,14 @@
         }
       }
       if (app.opts.places && tp >= 3.5) {
+        NW.render.drawRoads(mctx, app.world, vp, tp);
+        app.civMisses.length = 0;
         for (var sy = range.c0y; sy <= range.c1y; sy++) {
           for (var sx = range.c0x; sx <= range.c1x; sx++) {
             var c3 = app.world.getChunk(sx, sy);
             if (c3) {
-              NW.render.drawSites(mctx, c3,
-                (sx * CHUNK - vp.left) * tp, (sy * CHUNK - vp.top) * tp, tp, app.texSeed);
+              NW.render.drawSites(mctx, app.world, c3,
+                (sx * CHUNK - vp.left) * tp, (sy * CHUNK - vp.top) * tp, tp, app.civMisses);
             }
           }
         }
@@ -683,7 +691,9 @@
 
     updateMinimap(vp);
     if (!app.lowres && !app.missing) {
-      /* Both wait for the map itself to be finished before spending a frame. */
+      /* Idle-frame jobs, in order of what the user is most likely looking at. */
+      pumpDossier();
+      civPump();
       if (app.basisKey !== basisKey()) buildBasisSheet();
       else pumpCandidates();
     }
@@ -844,6 +854,7 @@
       tourOpen();
     });
     $('tourClose').addEventListener('click', tourClose);
+    $('dosClose').addEventListener('click', closeDossier);
     $('tourCards').addEventListener('click', function (e) {
       var card = e.target.closest ? e.target.closest('.tour-card') : null;
       if (card && app.tour && app.tour.phase !== 'rest') tourPick(parseInt(card.dataset.idx, 10));
@@ -1039,10 +1050,18 @@
         return;
       }
       if (pts.size === 0) {
-        if (moved < 8 && e.pointerType !== 'mouse' && e.type === 'pointerup') {
+        if (moved < 8 && e.type === 'pointerup') {
           var r = map.getBoundingClientRect();
-          app.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
-          app.hoverTick = 0;   /* inspect the tapped tile right away */
+          var cx2 = e.clientX - r.left, cy2 = e.clientY - r.top;
+          var hit = siteHit(cx2, cy2);
+          if (hit) {
+            openDossier(hit);
+          } else if (app.dossier) {
+            closeDossier();
+          } else if (e.pointerType !== 'mouse') {
+            app.hover = { x: cx2, y: cy2 };
+            app.hoverTick = 0;   /* inspect the tapped tile right away */
+          }
         }
         dragging = false;
         map.classList.remove('dragging');
@@ -1083,6 +1102,7 @@
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       var k = e.key.toLowerCase();
       /* Inside the tournament the keyboard belongs to it: 1/2/3 pick, Esc leaves. */
+      if (k === 'escape' && app.dossier) { closeDossier(); return; }
       if (app.tour) {
         if (k === 'escape') tourClose();
         if (k >= '1' && k <= '3' && app.tour.phase !== 'rest') {
@@ -1204,6 +1224,208 @@
     for (var i = 0; i < kids.length; i++) {
       kids[i].className = (+kids[i].dataset.neuron === app.probe.neuron) ? 'sel' : '';
     }
+  }
+
+  /* ------------------------------------------------------- civilisation --- */
+
+  /*
+   * The civ layer fills in like everything else: budgeted, idle-frame work.
+   * Priority is what the user can see — site probes for on-screen cells first,
+   * then each known town's allegiance, trade partners and roads, one costly
+   * item per frame so the map never hitches while the atlas thickens.
+   */
+  function civPump() {
+    if (!app.world || app.mode !== 'biome' || !app.opts.places) return;
+    var civ = NW.civ.civOf(app.world);
+    var end = performance.now() + 6;
+
+    /* 1. resolve site probes the renderer reported missing */
+    while (app.civMisses.length && performance.now() < end) {
+      var cell = app.civMisses.pop();
+      NW.civ.siteAt(app.world, cell[0], cell[1]);
+    }
+    if (performance.now() >= end) return;
+
+    /* 2. one heavier item: a town's nation, or one road to a trade partner */
+    if (!app.civQueued || app.civQueued.world !== app.world) {
+      app.civQueued = { world: app.world, done: new Set(), roads: [] };
+    }
+    var q = app.civQueued;
+    if (q.roads.length) {
+      var job = q.roads.shift();
+      NW.civ.roadBetween(app.world, job[0], job[1]);
+      return;
+    }
+    /* Nearest unprocessed town to the camera gets its allegiance and roads. */
+    var found = null, fd = Infinity;
+    civ.sites.forEach(function (site) {
+      if (!site || q.done.has(site.key)) return;
+      var d = Math.abs(site.wx - app.cam.x) + Math.abs(site.wy - app.cam.y);
+      if (d < fd && d < 1400) { fd = d; found = site; }
+    });
+    if (found) {
+      /* A town's allegiance needs its 3x3 provinces surveyed; a cold province
+       * is ~24 probes, and nine at once was a 200ms frame. One per frame. */
+      var pvx = Math.floor(found.gx / NW.civ.PROV), pvy = Math.floor(found.gy / NW.civ.PROV);
+      for (var py = -1; py <= 1; py++) {
+        for (var px = -1; px <= 1; px++) {
+          if (!civ.provs.has((pvx + px) + ',' + (pvy + py))) {
+            NW.civ.provCapital(app.world, pvx + px, pvy + py);
+            return;
+          }
+        }
+      }
+      q.done.add(found.key);
+      NW.civ.nationOf(app.world, found);
+      var partners = NW.civ.nearestSites(app.world, found, 2, 5);
+      for (var i = 0; i < partners.length; i++) q.roads.push([found, partners[i]]);
+    }
+  }
+
+  /* ----------------------------------------------------------- dossier --- */
+
+  function esc(t) {
+    return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function openDossier(site) {
+    app.dossier = { site: site, done: false };
+    $('dossier').classList.remove('hidden');
+    $('dosName').textContent = site.name;
+    $('dosBody').innerHTML =
+      '<div class="dos-sub">' + esc(site.culture.folk) + ' ' +
+      (site.kind === 'coast' ? 'harbour' : site.kind === 'river' ? 'ford-town'
+        : site.kind === 'high' ? 'hold' : site.kind === 'wood' ? 'forest town'
+        : site.kind === 'dry' ? 'well-town' : 'market town') +
+      ' · consulting the atlas&hellip;</div>';
+  }
+
+  function closeDossier() {
+    app.dossier = null;
+    $('dossier').classList.add('hidden');
+  }
+
+  /*
+   * The first click on a region pays for its provinces (a few dozen probes).
+   * That work is sliced across frames here; the dossier renders when done.
+   */
+  function pumpDossier() {
+    var d = app.dossier;
+    if (!d || d.done) return;
+    var end = performance.now() + 13;
+    var pvx = Math.floor(d.site.gx / NW.civ.PROV), pvy = Math.floor(d.site.gy / NW.civ.PROV);
+    for (var dy = -1; dy <= 1; dy++) {
+      for (var dx = -1; dx <= 1; dx++) {
+        NW.civ.provCapital(app.world, pvx + dx, pvy + dy);
+        if (performance.now() > end) return;   /* resume next frame */
+      }
+    }
+    var doc = NW.civ.dossier(app.world, d.site);
+    d.done = true;
+    renderDossier(doc);
+    /* roads to this town's partners are now the most interesting thing to build */
+    if (app.civQueued && app.civQueued.world === app.world) {
+      for (var i = 0; i < doc.trade.partners.length; i++) {
+        app.civQueued.roads.unshift([d.site, doc.trade.partners[i].site]);
+      }
+    }
+  }
+
+  function renderDossier(d) {
+    var s = d.site, f = d.faith;
+    var kindWord = s.kind === 'coast' ? 'harbour' : s.kind === 'river' ? 'ford-town'
+      : s.kind === 'high' ? 'hold' : s.kind === 'wood' ? 'forest town'
+      : s.kind === 'dry' ? 'well-town' : 'market town';
+    var html = '';
+
+    html += '<div class="dos-sub">' + esc(s.culture.folk) + ' ' + kindWord +
+      ' · pop. ~' + d.population + ' · founded Y.' + d.founded +
+      ' · now Y.' + d.year + ', ' + esc(d.era) + '</div>';
+
+    html += '<h4><i style="background:' + d.nation.color + '"></i>' + esc(d.nation.name) + '</h4>';
+    html += '<p>' + (d.nation.capital.key === s.key
+      ? 'Capital of the realm.'
+      : 'Sworn to the capital at <b>' + esc(d.nation.capital.name) + '</b>.') +
+      ' Founded Y.' + d.nation.founded + '.</p>';
+
+    html += '<h4>Culture &amp; tongue</h4>';
+    html += '<p>' + esc(s.culture.folk) + ', speakers of ' + esc(s.culture.tongue) +
+      '; known for ' + esc(s.culture.craft) + '. They hold to ' +
+      esc(s.culture.values.join(' and ')) + '.</p>';
+
+    html += '<h4>Faith</h4>';
+    html += '<p>' + esc(f.deity) + ' — ' + esc(f.creed) + '. Rites: ' + esc(f.rites) +
+      '. Taboo: ' + esc(f.taboo) + '.' +
+      (d.localShrine ? ' This town ' + esc(d.localShrine) + '.' : '') + '</p>';
+
+    html += '<h4>Clans</h4><ul>';
+    for (var c = 0; c < d.clans.length; c++) {
+      var cl = d.clans[c];
+      html += '<li><b>clan ' + esc(cl.name) + '</b> — totem ' + esc(cl.totem) +
+        ', holds ' + esc(cl.seat) + ', trades in ' + esc(cl.trade) + '</li>';
+    }
+    html += '</ul>';
+
+    html += '<h4>People of note</h4><ul>';
+    for (var pi = 0; pi < d.people.length; pi++) {
+      var pe = d.people[pi];
+      html += '<li><b>' + esc(pe.name) + '</b> of clan ' + esc(pe.clan) +
+        ', ' + esc(pe.role) + ' (b. Y.' + pe.born + ')' +
+        (pe.line ? ' — ' + esc(pe.line) : '') + '</li>';
+    }
+    html += '</ul>';
+
+    if (d.artifacts.length) {
+      html += '<h4>Treasures</h4><ul>';
+      for (var ai = 0; ai < d.artifacts.length; ai++) {
+        var art = d.artifacts[ai];
+        html += '<li><b>' + esc(art.name) + '</b> — ' + esc(art.material) +
+          ', made Y.' + art.made + ' by ' + esc(art.maker) + '; ' + esc(art.purpose) + '</li>';
+      }
+      html += '</ul>';
+    }
+
+    html += '<h4>Trade</h4>';
+    html += '<p>Sends out ' + esc(d.trade.exports.join(', ')) +
+      (d.trade.imports.length ? '; buys in ' + esc(d.trade.imports.join(', ')) : '') + '.</p>';
+    if (d.trade.partners.length) {
+      html += '<ul>';
+      for (var ti = 0; ti < d.trade.partners.length; ti++) {
+        var tp2 = d.trade.partners[ti];
+        var dist = Math.round(Math.hypot(tp2.site.wx - s.wx, tp2.site.wy - s.wy));
+        html += '<li><b>' + esc(tp2.site.name) + '</b> (' + dist + ' tiles away) sends ' +
+          esc(tp2.sends) + ', takes ' + esc(tp2.takes) + '</li>';
+      }
+      html += '</ul>';
+    }
+
+    html += '<h4>Chronicle of ' + esc(d.nation.shortName) + '</h4><ul class="dos-chron">';
+    for (var hi = 0; hi < d.history.length; hi++) {
+      html += '<li><b>Y.' + d.history[hi].y + '</b> ' + esc(d.history[hi].t) + '</li>';
+    }
+    html += '</ul>';
+
+    $('dosBody').innerHTML = html;
+  }
+
+  /* Hit-test the cached, visible settlements around a screen point. */
+  function siteHit(px, py) {
+    if (!app.world || !app.world.civ) return null;
+    var vp = viewport();
+    var tp = app.cam.tilePx;
+    var g0x = Math.floor(vp.left / NW.civ.CELL) - 1, g1x = Math.floor(vp.right / NW.civ.CELL) + 1;
+    var g0y = Math.floor(vp.top / NW.civ.CELL) - 1, g1y = Math.floor(vp.bottom / NW.civ.CELL) + 1;
+    var best = null, bd = 18 * 18;
+    for (var gy = g0y; gy <= g1y; gy++) {
+      for (var gx = g0x; gx <= g1x; gx++) {
+        var site = app.world.civ.sites.get(gx + ',' + gy);
+        if (!site) continue;
+        var sx = (site.wx + 0.5 - vp.left) * tp, sy2 = (site.wy + 0.5 - vp.top) * tp;
+        var d2 = (sx - px) * (sx - px) + (sy2 - py) * (sy2 - py);
+        if (d2 < bd) { bd = d2; best = site; }
+      }
+    }
+    return best;
   }
 
   /* --------------------------------------------------------- tournament --- */

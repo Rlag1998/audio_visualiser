@@ -77,10 +77,19 @@
   <div id="hint">
     <span><b>Hover</b> anywhere to trace the network's forward pass for that tile</span>
     <span><b>N</b> breeds a mutated world &middot; <b>M</b> cycles nine views &middot; <b>R</b> rolls a new brain</span>
+    <span><b>Click a town</b> for its dossier — nation, faith, clans, people, trade</span>
     <span>Drag <b>network authority</b> to 0% to see the plain noise underneath</span>
     <button id="hintClose" title="Dismiss">&times;</button>
   </div>
 </main>
+
+<div id="dossier" class="hidden">
+  <div class="dos-head">
+    <div class="dos-title" id="dosName"></div>
+    <button id="dosClose" class="btn" title="Close (Esc)">&times;</button>
+  </div>
+  <div id="dosBody"></div>
+</div>
 
 <!-- Body-level on purpose: #stage is position:fixed and so forms a stacking
      context; a child overlay could never paint above the topbar or panel. -->
@@ -250,6 +259,7 @@
 <script src="js/evo.js"></script>
 <script src="js/biome.js"></script>
 <script src="js/world.js"></script>
+<script src="js/civ.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>

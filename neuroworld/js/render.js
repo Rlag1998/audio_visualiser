@@ -287,116 +287,25 @@
   /* ---------------------------------------------------------- settlements --- */
 
   /*
-   * Places are read out of the same six channels the terrain is made of: fresh
-   * water, workable ground, flora to live off, ore to dig, a tolerable climate.
-   * One candidate per 44-tile cell, its position fixed by a hash of the cell
-   * coordinates, accepted or rejected by the score — so a settlement belongs to
-   * exactly one cell and never depends on which chunks happen to be loaded.
-   *
-   * The name is chosen from the terrain that earned the site its score, which is
-   * why river towns are fords and headlands are havens.
+   * Sites come from the shared civ layer (one truth for rendering, dossiers,
+   * nations and roads). Cells not yet probed are reported in `misses` so the
+   * app can queue them; markers appear as the probes resolve.
    */
-  var CELL = 34;
-
-  var SYL_A = ['bar', 'cal', 'dun', 'el', 'far', 'gor', 'hal', 'ith', 'kel', 'mor',
-    'nor', 'ost', 'pel', 'ryn', 'sal', 'thar', 'ul', 'ven', 'wyn', 'yar', 'aske', 'brin'];
-  var SYL_B = ['bry', 'dor', 'gan', 'hem', 'lin', 'mar', 'nes', 'rid', 'sten',
-    'thal', 'vor', 'wick', 'gath', 'mel'];
-  var SUFFIX = {
-    river: ['ford', 'mere', 'bridge', 'weir'],
-    coast: ['port', 'haven', 'bay', 'strand'],
-    high: ['fell', 'crag', 'scar', 'heights'],
-    wood: ['holt', 'wood', 'glade', 'thicket'],
-    dry: ['reach', 'waste', 'well', 'span'],
-    plain: ['stead', 'ton', 'field', 'march', 'garth']
-  };
-
-  function placeName(seed, kind) {
-    var rnd = NW.rand.rng(seed);
-    var s = SYL_A[(rnd() * SYL_A.length) | 0];
-    if (rnd() < 0.45) s += SYL_B[(rnd() * SYL_B.length) | 0];
-    var list = SUFFIX[kind] || SUFFIX.plain;
-    s += list[(rnd() * list.length) | 0];
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-
-  /* Is open water within a few tiles? Sampled inside the chunk only. */
-  function nearWater(chunk, tx, ty, radius) {
-    for (var a = 0; a < 12; a++) {
-      var ang = a / 12 * Math.PI * 2;
-      var qx = (tx + Math.cos(ang) * radius) | 0;
-      var qy = (ty + Math.sin(ang) * radius) | 0;
-      if (qx < 0 || qy < 0 || qx >= CHUNK || qy >= CHUNK) continue;
-      if (chunk.hn[qy * CHUNK + qx] < 0) return true;
-    }
-    return false;
-  }
-
-  function computeSites(chunk, seed) {
-    var sites = [];
+  function drawSites(ctx, world, chunk, ox, oy, tilePx, misses) {
+    var sites = NW.civ.sitesForChunk(world, chunk, misses);
+    if (!sites.length) return;
     var bx = chunk.cx * CHUNK, by = chunk.cy * CHUNK;
-    var g0x = Math.floor(bx / CELL), g1x = Math.floor((bx + CHUNK - 1) / CELL);
-    var g0y = Math.floor(by / CELL), g1y = Math.floor((by + CHUNK - 1) / CELL);
-
-    for (var gy = g0y; gy <= g1y; gy++) {
-      for (var gx = g0x; gx <= g1x; gx++) {
-        var h = NW.rand.hash2(gx, gy, seed);
-        var wx = gx * CELL + (h % CELL);
-        var wy = gy * CELL + (((h / CELL) | 0) % CELL);
-        var tx = wx - bx, ty = wy - by;
-        if (tx < 0 || ty < 0 || tx >= CHUNK || ty >= CHUNK) continue;
-
-        var i = ty * CHUNK + tx;
-        var hn = chunk.hn[i];
-        if (hn < 0.004 || hn > 0.62) continue;
-        var slope = chunk.slope[i];
-        if (slope > 0.62) continue;
-
-        var river = chunk.river[i] > 0.2;
-        var coast = nearWater(chunk, tx, ty, 5);
-        var temp = chunk.temp[i];
-        var score =
-          (river ? 0.34 : 0) +
-          (coast ? 0.24 : 0) +
-          chunk.flora[i] * 0.26 +
-          chunk.ore[i] * 0.16 +
-          (1 - slope) * 0.18 +
-          (1 - Math.abs(temp - 0.55) * 2) * 0.2 +
-          chunk.moist[i] * 0.1;
-        if (score < 0.58) continue;
-
-        var bi = chunk.biome[i];
-        var kind = river ? 'river' : (coast ? 'coast'
-          : (hn > 0.34 ? 'high'
-            : (bi === 9 || bi === 10 || bi === 11 ? 'wood'
-              : (chunk.moist[i] < 0.25 ? 'dry' : 'plain'))));
-
-        sites.push({
-          tx: tx, ty: ty,
-          rank: score > 1.0 ? 2 : (score > 0.8 ? 1 : 0),
-          name: placeName(h ^ 0x5f3a, kind)
-        });
-      }
-    }
-    return sites;
-  }
-
-  function drawSites(ctx, chunk, ox, oy, tilePx, seed) {
-    if (!chunk.sites || chunk.sitesSeed !== seed) {
-      chunk.sites = computeSites(chunk, seed);
-      chunk.sitesSeed = seed;
-    }
-    if (!chunk.sites.length) return;
     var labels = tilePx >= 5.5;
     ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
 
-    for (var s = 0; s < chunk.sites.length; s++) {
-      var site = chunk.sites[s];
-      var px = ox + (site.tx + 0.5) * tilePx;
-      var py = oy + (site.ty + 0.5) * tilePx;
+    for (var s = 0; s < sites.length; s++) {
+      var site = sites[s];
+      var px = ox + (site.wx - bx + 0.5) * tilePx;
+      var py = oy + (site.wy - by + 0.5) * tilePx;
       var rad = 2.6 + site.rank * 1.6;
+      var nation = world.civ.siteNation.get(site.key);
 
       ctx.fillStyle = 'rgba(12,16,22,0.85)';
       ctx.beginPath();
@@ -405,7 +314,6 @@
       ctx.fillStyle = site.rank === 2 ? '#f2e3c0' : (site.rank === 1 ? '#e0d3b4' : '#c3bda9');
       ctx.beginPath();
       if (site.rank === 2) {
-        /* Cities get a ringed marker so the hierarchy reads at a glance. */
         ctx.arc(px, py, rad, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = 'rgba(12,16,22,0.85)';
@@ -417,6 +325,14 @@
         ctx.arc(px, py, rad, 0, Math.PI * 2);
         ctx.fill();
       }
+      /* Nation ring, once the town's allegiance has been derived. */
+      if (nation) {
+        ctx.strokeStyle = nation.color;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(px, py, rad + 2.6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       if (labels) {
         ctx.lineWidth = 3;
@@ -427,6 +343,45 @@
       }
     }
     ctx.textAlign = 'left';
+  }
+
+  /*
+   * Roads, drawn in world space from the civ layer's pathfound polylines.
+   * Land runs are solid track; water runs are the ferry — dashed, cooler.
+   */
+  function drawRoads(ctx, world, vp, tilePx) {
+    if (!world.civ || !world.civ.roadList.length) return;
+    var lw = Math.max(1, tilePx * 0.16);
+    for (var r = 0; r < world.civ.roadList.length; r++) {
+      var road = world.civ.roadList[r];
+      var bb = road.bbox;
+      if (bb[2] < vp.left || bb[0] > vp.right || bb[3] < vp.top || bb[1] > vp.bottom) continue;
+      var pts = road.pts;
+      var run = null;   /* current stroke: 0 = land, 1 = ferry */
+      for (var i = 0; i < pts.length; i++) {
+        var x = (pts[i][0] - vp.left) * tilePx;
+        var y = (pts[i][1] - vp.top) * tilePx;
+        var wet = pts[i][2];
+        if (run === null || wet !== run) {
+          if (run !== null) ctx.stroke();
+          ctx.beginPath();
+          if (i > 0) {
+            ctx.moveTo((pts[i - 1][0] - vp.left) * tilePx, (pts[i - 1][1] - vp.top) * tilePx);
+            ctx.lineTo(x, y);
+          } else {
+            ctx.moveTo(x, y);
+          }
+          run = wet;
+          ctx.strokeStyle = wet ? 'rgba(150,180,206,0.55)' : 'rgba(168,138,92,0.6)';
+          ctx.lineWidth = wet ? lw * 0.8 : lw;
+          ctx.setLineDash(wet ? [tilePx * 0.8, tilePx * 0.8] : []);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      if (run !== null) ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
   /* ---------------------------------------------------------- coarse LOD --- */
@@ -512,6 +467,7 @@
     rasterize: rasterize,
     drawDecor: drawDecor,
     drawSites: drawSites,
+    drawRoads: drawRoads,
     regionToCanvas: regionToCanvas,
     blurCanvas: blurCanvas
   };
