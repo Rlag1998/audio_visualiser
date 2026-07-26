@@ -216,8 +216,14 @@
     X[o + 14] = p.z[2];
     X[o + 15] = p.z[3];
 
-    /* Kept for the noise end of the "network authority" blend. */
-    aux[ao] = clamp(nl * 1.05 + nc * 0.62 + nr * 0.12, -1, 1);
+    /*
+     * The noise end of the "network authority" blend. Weighted as a conventional
+     * fbm terrain — amplitude falling with frequency, a little ridging, a slow
+     * continental term — rather than something deliberately bland. The dial is
+     * meant to be a fair comparison, and it is not one if the baseline is rigged
+     * to look worse than it should.
+     */
+    aux[ao] = clamp(nl * 0.55 + nc * 0.9 + nd * 0.22 + nr * 0.2, -1, 1);
     aux[ao + 1] = nd;
     aux[ao + 2] = wq;
     aux[ao + 3] = nr;

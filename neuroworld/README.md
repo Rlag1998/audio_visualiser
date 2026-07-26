@@ -32,9 +32,12 @@ river towns come out as fords and headlands as havens.
 3. Set the view to **neuron activation** and step through the neurons. Every feature
    you see on the map is a weighted sum of pictures like those.
 4. Drag **network authority** from 100% to 0%. At 100% the terrain is purely the
-   network; at 0% it is the plain fractal noise the network receives as input. The
-   land/sea split and climate spread are held identical across the dial, so it is a
-   fair comparison of what the network actually contributes.
+   network; at 0% it is the plain fractal noise the network receives as input —
+   weighted as a conventional fbm terrain, not deliberately made bland, because a
+   comparison against a rigged baseline is worth nothing. The land/sea split and
+   the climate spread are held identical across the dial too. What changes is
+   structure: the noise gives you smooth blobby landmasses, the network gives you
+   folded coastlines, marbling and enclosed basins.
 5. Click an **offspring** thumbnail, then another, then another. That is interactive
    evolution: each is the parent's weights plus gaussian noise, with the odd
    activation function swapped. Hit **link** and the whole lineage is in the URL.

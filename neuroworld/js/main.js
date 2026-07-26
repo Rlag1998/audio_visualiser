@@ -349,6 +349,14 @@
      */
     if (range.missing && app.mode === 'biome') drawPreview(vp, 'backdrop');
 
+    /*
+     * Changing the probed neuron invalidates every visible chunk's activation
+     * map at once. Re-running them all in one frame is a couple of hundred
+     * milliseconds, so they refresh a few per frame like everything else — the
+     * map ripples over to the new neuron instead of stopping dead.
+     */
+    var probeBudget = Math.max(1, Math.floor(samplesFor(11, 1, 40000) / CHUNK_SAMPLES));
+
     mctx.imageSmoothingEnabled = !!app.opts.smooth;
     for (var cy = range.c0y; cy <= range.c1y; cy++) {
       for (var cx = range.c0x; cx <= range.c1x; cx++) {
@@ -366,6 +374,8 @@
           continue;
         }
         if (app.mode === 'neuron' && ch.probeTag !== probeTag) {
+          if (probeBudget <= 0) continue;
+          probeBudget--;
           ch.probe = app.world.probeNeuron(cx, cy, app.probe.layer, app.probe.neuron);
           ch.probeTag = probeTag;
           ch.rasterMode = null;
