@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroWorld — a 2D world generator whose terrain is a neural network</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div id="boot">
+  <div class="boot-card">
+    <h1>NeuroWorld</h1>
+    <p class="boot-sub">Training the biome network</p>
+    <div class="boot-bar"><div id="bootFill"></div></div>
+    <p id="bootStat" class="boot-stat">initialising&hellip;</p>
+    <p class="boot-note">
+      A 3-layer MLP is learning to read height, moisture, temperature, slope and
+      river flow and answer with a probability over 16 biomes. Nothing is
+      downloaded &mdash; the gradients are running in this tab.
+    </p>
+  </div>
+</div>
+
+<header id="topbar">
+  <div class="brand">Neuro<span>World</span></div>
+
+  <label class="field">
+    <span>seed</span>
+    <input id="seedInput" type="text" spellcheck="false" value="orpheus">
+  </label>
+  <button id="seedDice" class="btn" title="Random seed (R)">&#9862; roll</button>
+  <button id="btnEvolve" class="btn" title="Breed offspring from this world (N)">&#10022; evolve</button>
+
+  <label class="field">
+    <span>view</span>
+    <select id="selView">
+      <option value="biome">biomes (learned)</option>
+      <option value="elev">elevation</option>
+      <option value="moist">moisture</option>
+      <option value="temp">temperature</option>
+      <option value="slope">slope</option>
+      <option value="hydro">hydrology</option>
+      <option value="flora">flora density</option>
+      <option value="ore">mineral density</option>
+      <option value="neuron">neuron activation</option>
+    </select>
+  </label>
+
+  <div id="neuronPick" class="field hidden">
+    <span>probe</span>
+    <select id="selLayer"></select>
+    <select id="selNeuron"></select>
+  </div>
+
+  <div class="spacer"></div>
+  <div id="stats" class="stats"></div>
+  <button id="btnLink" class="btn" title="Copy a permalink that rebuilds this exact world">link</button>
+  <button id="btnPng" class="btn" title="Save the current view as a PNG">png</button>
+  <button id="btnPanel" class="btn only-narrow">&#9776;</button>
+</header>
+
+<main id="stage">
+  <canvas id="map"></canvas>
+
+  <div id="hud">
+    <canvas id="minimap" width="176" height="176"></canvas>
+    <div id="hudCoords">&mdash;</div>
+    <div class="hud-zoom">
+      <button id="zoomOut" class="btn" title="Zoom out (−)">&minus;</button>
+      <button id="zoomIn" class="btn" title="Zoom in (+)">&plus;</button>
+    </div>
+  </div>
+
+  <div id="tooltip" class="hidden"></div>
+</main>
+
+<aside id="panel">
+
+  <section>
+    <h2>The network</h2>
+    <p class="hint">
+      A CPPN: random weights, a random activation function per neuron, never
+      trained. Its output <em>is</em> the terrain &mdash; six channels sampled per
+      tile. Change its shape and you change the planet.
+    </p>
+    <div class="row">
+      <label class="field grow"><span>hidden layers</span>
+        <select id="selDepth">
+          <option>2</option><option selected>3</option><option>4</option><option>5</option>
+        </select>
+      </label>
+      <label class="field grow"><span>width</span>
+        <select id="selWidth">
+          <option>12</option><option>18</option><option selected>24</option>
+          <option>32</option><option>48</option>
+        </select>
+      </label>
+    </div>
+    <label class="slider"><span>init gain <b id="vGain">1.90</b></span>
+      <input id="rngGain" type="range" min="0.6" max="3.2" step="0.05" value="1.9">
+    </label>
+    <div id="netFacts" class="facts"></div>
+  </section>
+
+  <section>
+    <h2>Latent vector <span class="tag">z</span></h2>
+    <p class="hint">
+      Four extra inputs held constant across the map. Slide them and every
+      coastline, desert and mountain range re-forms continuously &mdash; same
+      weights, different world.
+    </p>
+    <label class="slider"><span>z<sub>0</sub> <b id="vz0">0.00</b></span><input id="z0" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <label class="slider"><span>z<sub>1</sub> <b id="vz1">0.00</b></span><input id="z1" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <label class="slider"><span>z<sub>2</sub> <b id="vz2">0.00</b></span><input id="z2" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <label class="slider"><span>z<sub>3</sub> <b id="vz3">0.00</b></span><input id="z3" type="range" min="-1.5" max="1.5" step="0.01" value="0"></label>
+    <div class="row">
+      <button id="btnDrift" class="btn grow">&#9654; drift z <span class="key">space</span></button>
+      <button id="btnRandZ" class="btn">jump</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Offspring</h2>
+    <p class="hint">
+      Interactive evolution. Each candidate is this world's weights plus gaussian
+      noise, with the odd activation function swapped. Pick one and it becomes the
+      parent &mdash; the lineage is replayable from the permalink.
+    </p>
+    <div id="gallery"></div>
+    <label class="slider"><span>mutation &sigma; <b id="vSigma">0.12</b></span>
+      <input id="rngSigma" type="range" min="0.01" max="0.5" step="0.01" value="0.12">
+    </label>
+    <div class="row">
+      <button id="btnSpawn" class="btn grow">respawn candidates</button>
+      <button id="btnBack" class="btn" title="Undo the last mutation step">undo</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>World dials</h2>
+    <label class="slider"><span>feature scale <b id="vScale">260</b> tiles</span>
+      <input id="rngScale" type="range" min="60" max="900" step="10" value="260">
+    </label>
+    <label class="slider"><span>sea level <b id="vSea">0.00</b></span>
+      <input id="rngSea" type="range" min="-0.6" max="0.6" step="0.01" value="0">
+    </label>
+    <label class="slider"><span>network authority <b id="vAuth">80%</b></span>
+      <input id="rngAuth" type="range" min="0" max="1" step="0.01" value="0.8">
+    </label>
+    <p class="hint tight">
+      At 100% the terrain is purely the network's output. At 0% it is plain
+      fractal noise &mdash; the same noise the network gets as input. Slide it to
+      see exactly what the network is contributing.
+    </p>
+    <label class="slider"><span>river width <b id="vRivers">1.00</b></span>
+      <input id="rngRivers" type="range" min="0" max="3" step="0.05" value="1">
+    </label>
+    <div class="row toggles">
+      <label><input id="chkDecor" type="checkbox" checked> props</label>
+      <label><input id="chkContours" type="checkbox"> contours</label>
+      <label><input id="chkGrid" type="checkbox"> chunk grid</label>
+      <label><input id="chkSmooth" type="checkbox"> smooth</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Biome network</h2>
+    <p class="hint">
+      The only trained net here. It learned from a rule oracle, then generalised:
+      it answers with a distribution, so borders come out blended rather than
+      stepped.
+    </p>
+    <canvas id="lossCanvas" width="288" height="66"></canvas>
+    <div id="clsFacts" class="facts"></div>
+    <button id="btnRetrain" class="btn wide">retrain with a new init</button>
+  </section>
+
+  <section>
+    <h2>Inspector</h2>
+    <p class="hint">Hover the map. This is the forward pass for that one tile.</p>
+    <div id="insFields" class="facts"></div>
+    <canvas id="netCanvas" width="288" height="150"></canvas>
+    <canvas id="probCanvas" width="288" height="126"></canvas>
+  </section>
+
+  <section>
+    <h2>Keys</h2>
+    <div class="facts keys">
+      <div><b>WASD</b><span>pan</span></div>
+      <div><b>wheel</b><span>zoom</span></div>
+      <div><b>drag</b><span>pan</span></div>
+      <div><b>R</b><span>new brain</span></div>
+      <div><b>N</b><span>evolve</span></div>
+      <div><b>M</b><span>cycle view</span></div>
+      <div><b>space</b><span>drift z</span></div>
+      <div><b>G</b><span>grid</span></div>
+    </div>
+  </section>
+
+</aside>
+
+<script src="js/rng.js"></script>
+<script src="js/nn.js"></script>
+<script src="js/biome.js"></script>
+<script src="js/world.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
