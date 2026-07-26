@@ -34,7 +34,15 @@ nothing stored, everything a pure function of the ground:
 - **Cultures** are the regional terrain: coastal regions raise Tidefolk, highlands
   Cragfolk, deserts Duneborn, wetlands Mirefolk, tundra Frostkin, plains
   Heartlanders. Each family owns a phoneme bank, so every person, clan, deity,
-  town and nation in a region sounds related.
+  town and nation in a region sounds related — and each family forms **dialects**:
+  every 1024-tile region applies its own pair of sound shifts to the bank and its
+  own patronymic formula, so neighbouring towns speak identically while the same
+  folk half a world away sound like cousins, not clones (Maren speech in the
+  *Bryno manner* names a town Brynhaven where another coast says Brenhaven).
+  The same regional drift carries the rest of material culture: which of the
+  family's crafts a region is known for, what it builds in (stone because it *is*
+  stony), what is on its table, and the value its climate's real scarcity
+  teaches.
 - **Nations** form around the best town of each province; every other town swears
   to the capital *cheapest to reach over real terrain*, so borders fall on
   mountains and straits by construction.
@@ -213,6 +221,9 @@ tournament the UI offers — six individuals, three duels, a final, breed, repea
 - dossiers are bit-identical across independent world instances;
 - towns in the same region share a culture family 77% of the time vs 55% across
   distant regions;
+- dialects are identical within a region 6/6 and differ between far regions of
+  the *same* family 29/30; architecture, table and craft are honest to the
+  terrain 20/20 (a region claiming stonework has the relief to quarry);
 - 6/6 sampled nations worship something their capital's terrain actually has;
 - 64/64 sampled names decompose over their culture's phoneme bank;
 - ages are ordered, every patronymic resolves to a named parent, artifacts fall

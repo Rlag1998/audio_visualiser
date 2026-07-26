@@ -2193,11 +2193,12 @@ input[type=range]::-moz-range-thumb {
       core: ['a', 'e', 'ae', 'o', 'ea'],
       end: ['is', 'wyn', 'mor', 'ay', 'eth', 'a'],
       pEnd: ['a', 'is', 'en', 'ric', 'wyn', 'o'],
-      patro: '{child}, {parent}-born',
+      patros: ['{child}, {parent}-born', '{child} of {parent}’s crew'],
+      shifts: ['a>ae', 'w>v', 'l>ll', 'en>yn', 'o>oa'],
       deity: ['the Deep Mother', 'the Grey Swell', 'the Wavefather', 'the Ninth Tide'],
       polity: ['League', 'Compact', 'Free Harbours'],
       values: ['open harbours', 'oath-keeping between crews', 'hospitality to the shipwrecked'],
-      craft: 'net-weaving and hull-lore'
+      crafts: ['net-weaving and hull-lore', 'pearl-diving and rope-craft', 'chart-making and tide-reading']
     },
     {
       key: 'crag', folk: 'Cragfolk', tongue: 'Karvek speech',
@@ -2205,11 +2206,12 @@ input[type=range]::-moz-range-thumb {
       core: ['a', 'o', 'u', 'ar', 'or'],
       end: ['gar', 'dun', 'holt', 'grim', 'ek', 'ar'],
       pEnd: ['ek', 'ar', 'grim', 'a', 'or', 'ka'],
-      patro: '{child} {parent}sblood',
+      patros: ['{child} {parent}sblood', '{child}, hewn of {parent}'],
+      shifts: ['k>kh', 'g>gg', 'ar>or', 'u>ou', 'dun>dhun'],
       deity: ['the Anvil Sky', 'the First Peak', 'the Ash Warden', 'the Ridge Father'],
       polity: ['Hold', 'High Moot', 'Clanhold'],
       values: ['debts repaid in kind', 'the guest-right of the pass', 'stone before speech'],
-      craft: 'stone-cutting and delving'
+      crafts: ['stone-cutting and delving', 'ore-smelting and bell-founding', 'wall-raising and pass-craft']
     },
     {
       key: 'dune', folk: 'Duneborn', tongue: 'Azhari speech',
@@ -2217,11 +2219,12 @@ input[type=range]::-moz-range-thumb {
       core: ['a', 'i', 'aa', 'e', 'ai'],
       end: ['im', 'ar', 'esh', 'ud', 'ai', 'an'],
       pEnd: ['im', 'a', 'esh', 'ai', 'ud', 'an'],
-      patro: '{child} ked-{parent}',
+      patros: ['{child} ked-{parent}', '{child} al-{parent}'],
+      shifts: ['a>ah', 'ir>yr', 's>sh', 'e>i', 'z>dz'],
       deity: ['the Unblinking Sun', 'the First Well', 'the Star Road', 'the Red Horizon'],
       polity: ['Caliphate of the Wells', 'Caravan Court', 'Emirate'],
       values: ['water shared is honour earned', 'the star-paths kept secret', 'salt bonds unbroken'],
-      craft: 'star-reading and salt-trade'
+      crafts: ['star-reading and salt-trade', 'glass-firing and well-craft', 'dye-work and caravan-law']
     },
     {
       key: 'mire', folk: 'Mirefolk', tongue: 'Ondwe speech',
@@ -2229,11 +2232,12 @@ input[type=range]::-moz-range-thumb {
       core: ['e', 'o', 'ue', 'i', 'eo'],
       end: ['we', 'en', 'ola', 'esh', 'um', 'ei'],
       pEnd: ['we', 'en', 'ola', 'u', 'ei', 'am'],
-      patro: '{child} of {parent}’s hearth',
+      patros: ['{child} of {parent}’s hearth', '{child}, reed of {parent}'],
+      shifts: ['e>ie', 'o>ou', 'n>nn', 'w>v', 'l>lh'],
       deity: ['the River That Remembers', 'the Green Silence', 'the Rain Bringer', 'the Reed Mother'],
       polity: ['Delta Kingdom', 'River Court', 'Confluence'],
       values: ['the river carries all debts', 'no gate against the flood', 'green things tended'],
-      craft: 'reed-craft and flood-farming'
+      crafts: ['reed-craft and flood-farming', 'dye-steeping and eel-trapping', 'boat-weaving and silt-lore']
     },
     {
       key: 'frost', folk: 'Frostkin', tongue: 'Ulvet speech',
@@ -2241,11 +2245,12 @@ input[type=range]::-moz-range-thumb {
       core: ['e', 'i', 'a', 'ei', 'y'],
       end: ['ik', 'stad', 'vik', 'en', 'heim', 'a'],
       pEnd: ['ik', 'a', 'en', 'dis', 'ulf', 'ny'],
-      patro: '{child} {parent}sdottir-or-son',
+      patros: ['{child} {parent}sdottir-or-son', '{child} {parent}skin'],
+      shifts: ['i>y', 'e>ei', 'v>f', 'k>kk', 'a>o'],
       deity: ['the Long Night', 'the Hearth Undying', 'the White Bear', 'the Thaw'],
       polity: ['Jarldom', 'Thing', 'Winter Court'],
       values: ['the hearth refused to none', 'meat shared before the dark', 'ice read truly'],
-      craft: 'bone-carving and ice-craft'
+      crafts: ['bone-carving and ice-craft', 'fur-dressing and lamp-oil rendering', 'sled-wrighting and star-steering']
     },
     {
       key: 'heart', folk: 'Heartlanders', tongue: 'Aldspeech',
@@ -2253,11 +2258,12 @@ input[type=range]::-moz-range-thumb {
       core: ['a', 'e', 'o', 'ea', 'i'],
       end: ['ton', 'field', 'stead', 'march', 'don', 'wick'],
       pEnd: ['a', 'ric', 'win', 'eth', 'ell', 'ot'],
-      patro: '{child} {parent}son',
+      patros: ['{child} {parent}son', '{child} of {parent}’s line'],
+      shifts: ['ton>tun', 'field>felde', 'o>ou', 'e>ea', 'w>wh'],
       deity: ['the Golden Furrow', 'the Turning Year', 'the Oak King', 'the Quiet Harvest'],
       polity: ['Kingdom', 'Shire Moot', 'March'],
       values: ['fences mended, feuds ended', 'the harvest tithe honest', 'roads kept open'],
-      craft: 'wheat-lore and wainwrighting'
+      crafts: ['wheat-lore and wainwrighting', 'orchard-keeping and cider-craft', 'horse-breaking and hedge-law']
     }
   ];
 
@@ -2280,24 +2286,118 @@ input[type=range]::-moz-range-thumb {
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
   function pick(rnd, arr) { return arr[(rnd() * arr.length) | 0]; }
 
-  function word(rnd, fam, withCore) {
-    var w = pick(rnd, fam.on);
-    if (withCore === undefined ? rnd() < 0.5 : withCore) w += pick(rnd, fam.core);
+  /* ------------------------------------------------------------ dialects --- */
+
+  /*
+   * A tongue is not one thing everywhere: within a family, each dialect region
+   * (1024 tiles square) applies two of the family's sound-shift rules to the
+   * whole phoneme bank, picks its own patronymic formula, and names its own
+   * manner of speech. Neighbouring towns therefore speak identically; the same
+   * folk half a world away sound like cousins, not clones — Maren speech in the
+   * Maera manner against Maren speech in the Vellae manner.
+   *
+   * The same regional drift carries every other cultural expression that used
+   * to be uniform by family: which craft the folk are known for is the
+   * dialect region's pick of the family's three.
+   */
+  var DIA = 1024;
+
+  function applyShifts(words, rules) {
+    return words.map(function (w) {
+      for (var r = 0; r < rules.length; r++) {
+        var xy = rules[r].split('>');
+        w = w.replace(xy[0], xy[1]);
+      }
+      return w;
+    });
+  }
+
+  function dialectFor(world, fi, rx, ry) {
+    var civ = civOf(world);
+    var key = fi + '|' + rx + ',' + ry;
+    var got = civ.dialects.get(key);
+    if (got) return got;
+
+    var fam = FAMILIES[fi];
+    var h = rand.hash2(rx * 6 + fi, ry, civ.seed ^ 0xd1a) >>> 0;
+    var rnd = rand.rng(h);
+    /* two distinct shift rules define this region's accent */
+    var i1 = (rnd() * fam.shifts.length) | 0;
+    var i2 = (i1 + 1 + ((rnd() * (fam.shifts.length - 1)) | 0)) % fam.shifts.length;
+    var rules = [fam.shifts[i1], fam.shifts[i2]];
+
+    /* Cores stay unshifted: they are bare vowels, and drifting them on top of
+     * the onset shifts turns names into vowel mush ("Maereaeric"). Consonant
+     * frames carry the accent; the vowels keep the names pronounceable. */
+    var bank = {
+      on: applyShifts(fam.on, rules),
+      core: fam.core,
+      end: applyShifts(fam.end, rules),
+      pEnd: applyShifts(fam.pEnd, rules)
+    };
+    var d = {
+      key: key,
+      bank: bank,
+      rules: rules,
+      patro: fam.patros[h % fam.patros.length],
+      craft: fam.crafts[(h >>> 3) % fam.crafts.length],
+      name: cap(bank.on[(h >>> 6) % bank.on.length] + bank.core[(h >>> 9) % bank.core.length]) + ' manner'
+    };
+    civ.dialects.set(key, d);
+    return d;
+  }
+
+  function word(rnd, bank, withCore) {
+    var w = pick(rnd, bank.on);
+    if (withCore === undefined ? rnd() < 0.5 : withCore) w += pick(rnd, bank.core);
     return w;
   }
 
-  function personName(rnd, fam) {
-    return cap(word(rnd, fam, rnd() < 0.35) + pick(rnd, fam.pEnd));
+  function personName(rnd, bank) {
+    return cap(word(rnd, bank, rnd() < 0.35) + pick(rnd, bank.pEnd));
   }
 
-  function placeName(rnd, fam, kind) {
-    var w = word(rnd, fam);
-    if (rnd() < 0.4) w += pick(rnd, fam.core);
+  function placeName(rnd, bank, kind) {
+    var w = word(rnd, bank);
+    if (rnd() < 0.4) w += pick(rnd, bank.core);
     return cap(w + pick(rnd, SUFFIX[kind] || SUFFIX.plain));
   }
 
-  function clanName(rnd, fam) {
-    return cap(word(rnd, fam, false) + pick(rnd, fam.end));
+  function clanName(rnd, bank) {
+    return cap(word(rnd, bank, false) + pick(rnd, bank.end));
+  }
+
+  /*
+   * The rest of a region's material culture, read from the same terrain stats
+   * that chose the family — what people build from, what is on their table, and
+   * the value their climate's real scarcity teaches. Uniform nowhere, arbitrary
+   * nowhere: a region builds in stone because it *is* stony.
+   */
+  function architectureOf(st) {
+    if (st.relief > 0.25) return 'dressed stone and slate';
+    if (st.sea > 0.2) return 'tarred timber on stone piers';
+    if (st.warmth < 0.3) return 'turf-roofed stone and hide';
+    if (st.moisture > 0.68) return 'reed bundle and fired clay';
+    if (st.moisture < 0.33) return 'mudbrick and canvas';
+    return 'timber frame and thatch';
+  }
+
+  function tableOf(st) {
+    if (st.sea > 0.2) return 'salt fish, samphire and dark bread';
+    if (st.warmth < 0.3) return 'smoked meat, marrow and berry-mash';
+    if (st.moisture < 0.33) return 'flatbread, dates and salted curd';
+    if (st.moisture > 0.68) return 'eel, rice-reed and river greens';
+    if (st.relief > 0.25) return 'goat cheese, oat-cake and thin beer';
+    return 'wheat bread, orchard fruit and ale';
+  }
+
+  function climateValueOf(st) {
+    if (st.moisture < 0.33) return 'no traveller refused water';
+    if (st.warmth < 0.3) return 'fire and roof owed to the lost';
+    if (st.moisture > 0.68) return 'high ground held in common';
+    if (st.relief > 0.25) return 'the paths kept marked';
+    if (st.sea > 0.2) return 'the drowned named and mourned';
+    return 'boundary stones respected';
   }
 
   /* -------------------------------------------------------------- caches --- */
@@ -2309,6 +2409,7 @@ input[type=range]::-moz-range-thumb {
         sites: new Map(),      /* cell -> site | null */
         cultures: new Map(),   /* cult-cell -> culture */
         provs: new Map(),      /* province -> capital site | null */
+        dialects: new Map(),   /* family|region -> drifted bank etc. */
         nations: new Map(),    /* capital key -> nation */
         siteNation: new Map(), /* site key -> nation */
         dossiers: new Map(),   /* site key -> dossier */
@@ -2358,6 +2459,7 @@ input[type=range]::-moz-range-thumb {
               : (p.moist[c] < 0.25 ? 'dry' : 'plain'))));
         var cult = cultureAt(world, wx, wy);
         var rnd = rand.rng((h ^ 0x5f3a) >>> 0);
+        var bank = cult.bank;
         site = {
           key: key, gx: gx, gy: gy, wx: wx, wy: wy,
           score: score, rank: score > 1.0 ? 2 : (score > 0.8 ? 1 : 0),
@@ -2365,7 +2467,7 @@ input[type=range]::-moz-range-thumb {
           hn: hn, ore: p.ore[c], flora: p.flora[c], moist: p.moist[c],
           temp: p.temp[c], river: river, coast: coast,
           culture: cult,
-          name: placeName(rnd, cult.fam, kind)
+          name: placeName(rnd, bank, kind)
         };
       }
     }
@@ -2412,13 +2514,28 @@ input[type=range]::-moz-range-thumb {
 
     var fam = FAMILIES[fi];
     var rnd = rand.rng((rand.hash2(cx, cy, civ.seed ^ 0x1ced) >>> 0));
+    var stats = { relief: mh, moisture: mm, warmth: mt, sea: sea };
+    var dia = dialectFor(world, fi, Math.floor(wx / DIA), Math.floor(wy / DIA));
     var culture = {
       key: key, fi: fi, fam: fam,
       folk: fam.folk, tongue: fam.tongue,
-      values: [fam.values[0], fam.values[1], fam.values[2]]
-        .filter(function (_, i2) { return i2 !== ((rnd() * 3) | 0); }),
-      craft: fam.craft,
-      stats: { relief: mh, moisture: mm, warmth: mt, sea: sea }
+      dialect: dia,
+      bank: dia.bank,
+      patro: dia.patro,
+      craft: dia.craft,
+      /* Two of the family's three values (the drop index chosen ONCE — a
+       * filter callback that rolled the dice per element could keep all three
+       * or none), plus the value the local climate actually teaches. */
+      values: (function () {
+        var drop = (rnd() * 3) | 0;
+        var v = [];
+        for (var vi = 0; vi < 3; vi++) if (vi !== drop) v.push(fam.values[vi]);
+        v.push(climateValueOf(stats));
+        return v;
+      })(),
+      architecture: architectureOf(stats),
+      table: tableOf(stats),
+      stats: stats
     };
     civ.cultures.set(key, culture);
     return culture;
@@ -2501,9 +2618,10 @@ input[type=range]::-moz-range-thumb {
   function buildNation(world, capSite) {
     var civ = civOf(world);
     var fam = capSite.culture.fam;
+    var bank = capSite.culture.bank;
     var rnd = rand.rng((rand.hash2(capSite.gx, capSite.gy, civ.seed ^ 0x7a11) >>> 0));
     var polity = fam.polity[POLITY_KIND[capSite.kind] || 0];
-    var coreName = cap(word(rnd, fam, true) + pick(rnd, fam.end));
+    var coreName = cap(word(rnd, bank, true) + pick(rnd, bank.end));
     var year = currentYear(world);
     var founded = year - (120 + ((rnd() * 640) | 0));
     return {
@@ -2530,7 +2648,6 @@ input[type=range]::-moz-range-thumb {
    * hearth-rites where warmth is.
    */
   function buildFaith(world, capSite, rnd) {
-    var fam = capSite.culture.fam;
     var cs = capSite.culture.stats;
     var kind, focus;
     if (capSite.biome === 15 || (capSite.temp > 0.78 && capSite.ore > 0.6)) {
@@ -2557,7 +2674,7 @@ input[type=range]::-moz-range-thumb {
       grove: ['the Root-Deep', 'Keeper of the Old Shade', 'the Leaf-Listener'],
       sky: ['the Wide-Watcher', 'Keeper of the Turning Year', 'the Rain-Promiser']
     };
-    var deityName = personName(rnd, fam);
+    var deityName = personName(rnd, capSite.culture.bank);
     var epithet = pick(rnd, KIND_EPITHETS[kind]);
     var rites =
       cs.moisture < 0.35 ? 'water-blessing at every well' :
@@ -2612,14 +2729,14 @@ input[type=range]::-moz-range-thumb {
   }
 
   function buildClans(world, site, rnd) {
-    var fam = site.culture.fam;
+    var bank = site.culture.bank;
     var n = 1 + site.rank + (rnd() < 0.4 ? 1 : 0);
     var totems = TOTEMS[site.biome] || TOTEMS[8];
     var spec = specialise(site);
     var clans = [];
     for (var i = 0; i < n; i++) {
       clans.push({
-        name: clanName(rnd, fam),
+        name: clanName(rnd, bank),
         totem: pick(rnd, totems),
         trade: GOODS[spec[i % spec.length]],
         seat: i === 0 ? 'the old quarter' : (i === 1 ? 'the ' + site.kind + ' side' : 'the outwalls')
@@ -2633,7 +2750,8 @@ input[type=range]::-moz-range-thumb {
    * the culture's own formula, ages consistent with the world's current year.
    */
   function buildPeople(world, site, clans, rnd) {
-    var fam = site.culture.fam;
+    var bank = site.culture.bank;
+    var patro = site.culture.patro;
     var year = currentYear(world);
     var roles = ROLE_BY_KIND[site.kind] || ROLE_BY_KIND.plain;
     var people = [];
@@ -2641,27 +2759,27 @@ input[type=range]::-moz-range-thumb {
       var clan = clans[c];
       var elderAge = 58 + ((rnd() * 22) | 0);
       var elder = {
-        name: personName(rnd, fam), clan: clan.name,
+        name: personName(rnd, bank), clan: clan.name,
         born: year - elderAge,
         role: c === 0 ? 'elder of clan ' + clan.name : pick(rnd, roles),
         line: null
       };
       var midAge = elderAge - 24 - ((rnd() * 8) | 0);
       var mid = {
-        name: personName(rnd, fam), clan: clan.name,
+        name: personName(rnd, bank), clan: clan.name,
         born: year - midAge,
         role: pick(rnd, roles),
-        line: fam.patro.replace('{child}', '').replace('{parent}', elder.name).trim()
+        line: patro.replace('{child}', '').replace('{parent}', elder.name).trim()
       };
       people.push(elder, mid);
       if (midAge > 20) {
         var yAge = midAge - 18 - ((rnd() * 6) | 0);
         if (yAge > 3) {
           people.push({
-            name: personName(rnd, fam), clan: clan.name,
+            name: personName(rnd, bank), clan: clan.name,
             born: year - yAge,
             role: yAge < 16 ? 'ward of the ' + clan.totem + ' lodge' : 'apprentice ' + pick(rnd, roles),
-            line: fam.patro.replace('{child}', '').replace('{parent}', mid.name).trim()
+            line: patro.replace('{child}', '').replace('{parent}', mid.name).trim()
           });
         }
       }
@@ -2696,7 +2814,7 @@ input[type=range]::-moz-range-thumb {
       var age = 40 + ((rnd() * Math.max(60, year - nation.founded)) | 0);
       var maker = clans[(rnd() * clans.length) | 0];
       out.push({
-        name: 'the ' + cap(word(rnd, site.culture.fam, true)) + ' ' + cap(form),
+        name: 'the ' + cap(word(rnd, site.culture.bank, true)) + ' ' + cap(form),
         material: material,
         /* A thing made by this town's clan cannot predate the town. */
         made: Math.min(year - 5, Math.max(founded, nation.founded, year - age)),
@@ -3006,6 +3124,7 @@ input[type=range]::-moz-range-thumb {
     civOf: civOf,
     siteAt: siteAt,
     cultureAt: cultureAt,
+    dialectFor: dialectFor,
     provCapital: provCapital,
     nationOf: nationOf,
     lineCost: lineCost,
@@ -5132,8 +5251,11 @@ input[type=range]::-moz-range-thumb {
 
     html += '<h4>Culture &amp; tongue</h4>';
     html += '<p>' + esc(s.culture.folk) + ', speakers of ' + esc(s.culture.tongue) +
-      '; known for ' + esc(s.culture.craft) + '. They hold to ' +
-      esc(s.culture.values.join(' and ')) + '.</p>';
+      ' in the <b>' + esc(s.culture.dialect.name) + '</b>; known for ' +
+      esc(s.culture.craft) + '. They build in ' + esc(s.culture.architecture) +
+      ', and their table is ' + esc(s.culture.table) + '.</p>';
+    html += '<p>They hold to ' + esc(s.culture.values.slice(0, 2).join(', ')) +
+      ', and — as their country teaches — ' + esc(s.culture.values[2]) + '.</p>';
 
     html += '<h4>Faith</h4>';
     html += '<p>' + esc(f.deity) + ' — ' + esc(f.creed) + '. Rites: ' + esc(f.rites) +

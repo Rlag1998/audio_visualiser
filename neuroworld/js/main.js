@@ -1350,8 +1350,11 @@
 
     html += '<h4>Culture &amp; tongue</h4>';
     html += '<p>' + esc(s.culture.folk) + ', speakers of ' + esc(s.culture.tongue) +
-      '; known for ' + esc(s.culture.craft) + '. They hold to ' +
-      esc(s.culture.values.join(' and ')) + '.</p>';
+      ' in the <b>' + esc(s.culture.dialect.name) + '</b>; known for ' +
+      esc(s.culture.craft) + '. They build in ' + esc(s.culture.architecture) +
+      ', and their table is ' + esc(s.culture.table) + '.</p>';
+    html += '<p>They hold to ' + esc(s.culture.values.slice(0, 2).join(', ')) +
+      ', and — as their country teaches — ' + esc(s.culture.values[2]) + '.</p>';
 
     html += '<h4>Faith</h4>';
     html += '<p>' + esc(f.deity) + ' — ' + esc(f.creed) + '. Rites: ' + esc(f.rites) +
