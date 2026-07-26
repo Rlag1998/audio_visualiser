@@ -33,6 +33,7 @@
     keys: {},
     fps: 0,
     texSeed: 0,
+    basisKey: '',
     perSample: 0,
     missing: 0,
     lastFrame: 0,
@@ -672,8 +673,11 @@
     }
 
     updateMinimap(vp);
-    /* Thumbnails are ~100ms each; they wait until the map itself is complete. */
-    if (!app.lowres && !app.missing) pumpCandidates();
+    if (!app.lowres && !app.missing) {
+      /* Both wait for the map itself to be finished before spending a frame. */
+      if (app.basisKey !== basisKey()) buildBasisSheet();
+      else pumpCandidates();
+    }
 
     if (app.hover && !app.lowres && now - app.hoverTick > 55) {
       app.hoverTick = now;
@@ -841,6 +845,7 @@
     });
     $('selLayer').addEventListener('change', function () {
       app.probe.layer = parseInt(this.value, 10);
+      app.basisKey = '';
       var w = app.world.net.layers[app.probe.layer].outDim;
       var selN = $('selNeuron');
       selN.innerHTML = '';
@@ -855,6 +860,18 @@
     });
     $('selNeuron').addEventListener('change', function () {
       app.probe.neuron = parseInt(this.value, 10);
+      markBasisSelection();
+    });
+
+    $('basis').addEventListener('click', function (e) {
+      if (!e.target.dataset || e.target.dataset.neuron === undefined) return;
+      app.probe.neuron = parseInt(e.target.dataset.neuron, 10);
+      $('selNeuron').value = app.probe.neuron;
+      markBasisSelection();
+      /* Clicking a tile is a request to look at it, so show it on the map. */
+      app.mode = 'neuron';
+      $('selView').value = 'neuron';
+      $('neuronPick').classList.remove('hidden');
     });
 
     $('chkDecor').addEventListener('change', function () { app.opts.decor = this.checked; });
@@ -1018,6 +1035,65 @@
     app.spec.seed = seed;
     app.spec.lineage = [];
     rebuildWorld(true);
+  }
+
+  /*
+   * The contact sheet: every neuron of the probed layer over the same patch of
+   * map. This is the closest the app gets to showing what the network *is* —
+   * the terrain is a weighted sum of these pictures, and mutating a weight
+   * changes how much of one of them ends up in the ground under your cursor.
+   *
+   * One forward pass produces all of them, so the whole sheet costs about what a
+   * single chunk does. The activation buffer it returns belongs to the network
+   * and is reused by the next forward pass, so it is drained here and now.
+   */
+  var BASIS_PX = 40;
+
+  function buildBasisSheet() {
+    var layer = app.probe.layer;
+    var net = app.world.net;
+    var step = Math.max(1, Math.round(app.spec.scale * 1.6 / BASIS_PX));
+    var g = app.world.probeLayerGrid(
+      Math.round(app.cam.x - BASIS_PX * step / 2),
+      Math.round(app.cam.y - BASIS_PX * step / 2),
+      BASIS_PX, step, layer);
+
+    var host = $('basis');
+    host.innerHTML = '';
+    var ramp = NW.render.RAMPS.neuron;
+    var tmp = [0, 0, 0];
+    for (var j = 0; j < g.oD; j++) {
+      var cv = document.createElement('canvas');
+      cv.width = cv.height = BASIS_PX;
+      var ctx = cv.getContext('2d');
+      var img = ctx.createImageData(BASIS_PX, BASIS_PX);
+      for (var i = 0; i < BASIS_PX * BASIS_PX; i++) {
+        ramp(g.act[i * g.oD + j] * 0.5 + 0.5, tmp);
+        img.data[i * 4] = tmp[0];
+        img.data[i * 4 + 1] = tmp[1];
+        img.data[i * 4 + 2] = tmp[2];
+        img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      cv.dataset.neuron = j;
+      cv.title = '#' + j + '   ' + net.actName(layer, j);
+      if (j === app.probe.neuron) cv.className = 'sel';
+      host.appendChild(cv);
+    }
+    $('basisLayer').textContent = 'h' + (layer + 1);
+    app.basisKey = basisKey();
+  }
+
+  function basisKey() {
+    return app.world.key + '|' + app.probe.layer + '|' +
+      Math.round(app.cam.x / 200) + ',' + Math.round(app.cam.y / 200);
+  }
+
+  function markBasisSelection() {
+    var kids = $('basis').children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].className = (+kids[i].dataset.neuron === app.probe.neuron) ? 'sel' : '';
+    }
   }
 
   function buildLegend() {

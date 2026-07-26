@@ -108,6 +108,14 @@
       <input id="rngGain" type="range" min="0.6" max="3.2" step="0.05" value="1.9">
     </label>
     <div id="netFacts" class="facts"></div>
+
+    <h3 class="sub">What <span id="basisLayer">h1</span> computes</h3>
+    <p class="hint tight">
+      Every neuron in the layer, over the same patch of map, from one forward
+      pass. The terrain is a weighted sum of these. Click one to put it on the
+      main map.
+    </p>
+    <div id="basis"></div>
   </section>
 
   <section>

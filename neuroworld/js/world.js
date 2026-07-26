@@ -572,6 +572,23 @@
     return outArr;
   };
 
+  /*
+   * Every neuron of one layer, over one square of the map, from a single forward
+   * pass — the activations for all of them come out of the same buffer, so the
+   * whole contact sheet costs one region's worth of work rather than one per
+   * neuron. The returned array is the network's own scratch buffer: read it
+   * before anything else calls forward().
+   */
+  World.prototype.probeLayerGrid = function (x0, y0, n, step, layer) {
+    var X = this._buf('gX', Float32Array, n * n * IN_DIM);
+    var aux = this._buf('gAux', Float32Array, n * n * AUX);
+    this.encodeRegion(X, aux, x0, y0, n, n, step);
+    return {
+      act: this.net.forward(X, n * n, layer),
+      oD: layer < 0 ? IN_DIM : this.net.layers[layer].outDim
+    };
+  };
+
   NW.world = {
     CHUNK: CHUNK,
     IN_DIM: IN_DIM,

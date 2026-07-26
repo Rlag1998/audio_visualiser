@@ -269,6 +269,28 @@ input[type=range]::-moz-range-thumb {
 .facts.keys b { color: var(--acc); }
 .facts .warn { color: var(--warn); }
 
+#panel h3.sub {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  margin: 14px 0 6px;
+}
+#panel h3.sub span { color: var(--acc2); }
+
+#basis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+#basis canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 2px;
+  cursor: pointer;
+  image-rendering: pixelated;
+  outline: 1px solid transparent;
+}
+#basis canvas:hover { outline-color: var(--acc); }
+#basis canvas.sel { outline: 2px solid var(--acc); }
+
 #legend { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; }
 #legend div { display: flex; align-items: center; gap: 6px; font: 10px/1.7 var(--mono); color: var(--dim); }
 #legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,.4) inset; }

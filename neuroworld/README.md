@@ -29,8 +29,10 @@ river towns come out as fords and headlands as havens.
 2. **Hover the map.** The inspector at the bottom of the panel shows that tile's
    entire forward pass: the input vector, every hidden activation, and the softmax
    the renderer blended into that pixel's colour.
-3. Set the view to **neuron activation** and step through the neurons. Every feature
-   you see on the map is a weighted sum of pictures like those.
+3. Look at the contact sheet under **the network**: every neuron of a hidden layer,
+   over the same patch of map, from one forward pass. That is the basis the terrain
+   is built from — a weighted sum of those pictures is your coastline. Click one to
+   put it on the main map full size.
 4. Drag **network authority** from 100% to 0%. At 100% the terrain is purely the
    network; at 0% it is the plain fractal noise the network receives as input —
    weighted as a conventional fbm terrain, not deliberately made bland, because a
@@ -59,6 +61,11 @@ river towns come out as fords and headlands as havens.
 
 Nine view modes: learned biomes, elevation, moisture, temperature, slope, hydrology,
 flora density, mineral density, and a single hidden neuron's activation.
+
+The panel carries the instrumentation: the network's topology and activation mix, the
+contact sheet of every neuron in a layer, the biome network's loss curve and its
+honest agreement score, a 16-class legend, and an inspector that shows the complete
+forward pass for whatever tile is under the cursor.
 
 ## How it works
 
