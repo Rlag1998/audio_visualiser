@@ -86,7 +86,9 @@
       depth: spec.depth,
       width: spec.width,
       gain: spec.gain,
-      lineage: spec.lineage.map(function (s) { return s.slice(); }),
+      lineage: spec.lineage.map(function (s) {
+        return s.t != null ? { t: s.t, p: s.p.slice() } : s.slice();
+      }),
       z: spec.z.slice(),
       scale: spec.scale,
       sea: spec.sea,
@@ -99,7 +101,9 @@
   function specKey(spec) {
     return [
       spec.seed, spec.depth, spec.width, spec.gain.toFixed(3),
-      spec.lineage.map(function (s) { return s[0] + ':' + s[1]; }).join(','),
+      spec.lineage.map(function (s) {
+        return s.t != null ? 'T' + s.t + ':' + s.p.join('') : s[0] + ':' + s[1];
+      }).join(','),
       spec.z.map(function (v) { return v.toFixed(4); }).join(','),
       spec.scale, spec.sea.toFixed(4), spec.auth.toFixed(4), spec.rivers.toFixed(3)
     ].join('|');
@@ -110,9 +114,13 @@
     for (var i = 0; i < spec.depth; i++) sizes.push(spec.width);
     sizes.push(OUT_DIM);
     var net = new NW.nn.FieldNet(IN_DIM, sizes, NW.rand.hashString(spec.seed), spec.gain);
-    /* Replay the mutation lineage: this is what makes an evolved world sharable. */
+    /* Replay the lineage: this is what makes an evolved world sharable. A step
+     * is either a mutation [seed, sigma] or a whole recorded tournament
+     * {t: seed, p: picks}, which NW.evo.replay expands into its champion. */
     for (var m = 0; m < spec.lineage.length; m++) {
-      net = net.mutate(spec.lineage[m][0] >>> 0, spec.lineage[m][1]);
+      var st = spec.lineage[m];
+      if (st.t != null) net = NW.evo.replay(net, st.t >>> 0, st.p || []);
+      else net = net.mutate(st[0] >>> 0, st[1]);
     }
     return net;
   }
@@ -124,11 +132,13 @@
    * ruinous when a slider fires sixty input events a second. So interactions
    * borrow the previous world's statistics and re-measure when the drag ends.
    */
-  function World(spec, classifier, reuseNorm, normSamples) {
+  function World(spec, classifier, reuseNorm, normSamples, netOverride) {
     this.spec = cloneSpec(spec);
-    this.key = specKey(this.spec);
+    this.key = specKey(this.spec) + (netOverride ? '|live' : '');
     this.classifier = classifier;
-    this.net = buildNet(this.spec);
+    /* Tournament thumbnails hold their individuals as live networks, not as
+     * replayable lineage — the override skips the rebuild for those. */
+    this.net = netOverride || buildNet(this.spec);
     var s = NW.rand.hashString(this.spec.seed);
     this.noiseA = new NW.rand.Noise(s ^ 0x1b873593);
     this.noiseB = new NW.rand.Noise(s ^ 0x85ebca6b);

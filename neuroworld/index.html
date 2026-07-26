@@ -82,6 +82,20 @@
   </div>
 </main>
 
+<!-- Body-level on purpose: #stage is position:fixed and so forms a stacking
+     context; a child overlay could never paint above the topbar or panel. -->
+<div id="tour" class="hidden">
+  <div class="tour-head">
+    <div class="tour-title">Tournament</div>
+    <div id="tourInfo"></div>
+    <div class="spacer"></div>
+    <button id="tourClose" class="btn" title="Close without adopting (Esc)">&times; close</button>
+  </div>
+  <p id="tourPrompt"></p>
+  <div id="tourCards"></div>
+  <div id="tourFoot"></div>
+</div>
+
 <aside id="panel">
 
   <section>
@@ -148,8 +162,14 @@
     </label>
     <div class="row">
       <button id="btnSpawn" class="btn grow">respawn candidates</button>
-      <button id="btnBack" class="btn" title="Undo the last mutation step">undo</button>
+      <button id="btnBack" class="btn" title="Undo the last evolution step">undo</button>
     </div>
+    <button id="btnTour" class="btn wide" title="Guided breeding: duels, winners breed, mutation decays">&#9654; run a tournament</button>
+    <p class="hint tight">
+      The gallery is one mutation step. A tournament is the full loop: pick
+      winners in head-to-head duels, winners <em>breed</em>, mutation shrinks
+      each generation &mdash; the line converges on what you keep choosing.
+    </p>
   </section>
 
   <section>
@@ -227,6 +247,7 @@
 
 <script src="js/rng.js"></script>
 <script src="js/nn.js"></script>
+<script src="js/evo.js"></script>
 <script src="js/biome.js"></script>
 <script src="js/world.js"></script>
 <script src="js/render.js"></script>

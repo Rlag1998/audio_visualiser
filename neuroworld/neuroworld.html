@@ -135,7 +135,7 @@ input[type=text]:focus, select:focus { outline: none; border-color: var(--acc); 
   overflow: hidden;
   background: #05070a;
 }
-#map { display: block; width: 100%; height: 100%; cursor: grab; }
+#map { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #map.dragging { cursor: grabbing; }
 
 #hud {
@@ -201,6 +201,81 @@ input[type=text]:focus, select:focus { outline: none; border-color: var(--acc); 
   padding: 4px 6px;
 }
 #hintClose:hover { color: var(--ink); }
+
+/* -------------------------------------------------------- tournament ---- */
+
+#tour {
+  position: fixed;
+  inset: 0;
+  z-index: 56;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  background: #070a0f;
+}
+.tour-head { display: flex; align-items: center; gap: 12px; }
+.tour-title {
+  font: 600 13px/1 var(--mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--acc);
+}
+#tourInfo { font: 11px/1.4 var(--mono); color: var(--dimmer); }
+#tourPrompt {
+  text-align: center;
+  color: var(--dim);
+  font-size: 13.5px;
+  margin: 8px 0 2px;
+}
+#tourPrompt b { color: var(--ink); font-weight: 500; }
+#tourCards {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  align-content: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.tour-card {
+  background: #0c1118;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 8px 5px;
+  cursor: pointer;
+  width: clamp(150px, min(40vh, 42vw), 330px);
+  -webkit-tap-highlight-color: transparent;
+}
+.tour-card canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: #0b0f16;
+  image-rendering: pixelated;
+}
+.tour-card .lab {
+  font: 10px/1 var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  text-align: center;
+  padding: 7px 0 3px;
+}
+.tour-card:hover { border-color: var(--acc); }
+.tour-card:active { transform: scale(.985); }
+.tour-card.champ { border-color: var(--acc2); }
+.tour-foot-note { width: 100%; text-align: center; font: 11px/1.5 var(--mono); color: var(--dimmer); }
+#tourFoot {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 8px 0 6px;
+}
+#tourFoot .btn { padding: 13px 22px; font-size: 12.5px; }
 
 /* ------------------------------------------------------------- panel ---- */
 
@@ -334,6 +409,12 @@ input[type=range]::-moz-range-thumb {
 .hidden { display: none !important; }
 .only-narrow { display: none; }
 
+@media (pointer: coarse) {
+  .btn { padding: 9px 13px; }
+  .row.toggles label { padding: 4px 0; }
+  input[type=range] { height: 26px; }
+}
+
 /* ------------------------------------------------------------ narrow ---- */
 
 @media (max-width: 900px) {
@@ -432,6 +513,20 @@ input[type=range]::-moz-range-thumb {
   </div>
 </main>
 
+<!-- Body-level on purpose: #stage is position:fixed and so forms a stacking
+     context; a child overlay could never paint above the topbar or panel. -->
+<div id="tour" class="hidden">
+  <div class="tour-head">
+    <div class="tour-title">Tournament</div>
+    <div id="tourInfo"></div>
+    <div class="spacer"></div>
+    <button id="tourClose" class="btn" title="Close without adopting (Esc)">&times; close</button>
+  </div>
+  <p id="tourPrompt"></p>
+  <div id="tourCards"></div>
+  <div id="tourFoot"></div>
+</div>
+
 <aside id="panel">
 
   <section>
@@ -498,8 +593,14 @@ input[type=range]::-moz-range-thumb {
     </label>
     <div class="row">
       <button id="btnSpawn" class="btn grow">respawn candidates</button>
-      <button id="btnBack" class="btn" title="Undo the last mutation step">undo</button>
+      <button id="btnBack" class="btn" title="Undo the last evolution step">undo</button>
     </div>
+    <button id="btnTour" class="btn wide" title="Guided breeding: duels, winners breed, mutation decays">&#9654; run a tournament</button>
+    <p class="hint tight">
+      The gallery is one mutation step. A tournament is the full loop: pick
+      winners in head-to-head duels, winners <em>breed</em>, mutation shrinks
+      each generation &mdash; the line converges on what you keep choosing.
+    </p>
   </section>
 
   <section>
@@ -885,6 +986,35 @@ input[type=range]::-moz-range-thumb {
     return c;
   };
 
+  /*
+   * Sexual reproduction, with the neuron as the gene: each neuron — its whole
+   * column of incoming weights, its bias, its activation function — comes from
+   * one parent or the other, never averaged. Averaging weights of two working
+   * neurons usually produces a broken one; taking whole neurons keeps each
+   * parent's features intact and lets selection decide which combination wins.
+   * Both parents descend from the same base network, so neuron positions are
+   * aligned and the swap is meaningful.
+   */
+  FieldNet.prototype.crossover = function (other, seed) {
+    var c = this.clone();
+    var rnd = rand.rng(seed >>> 0);
+    for (var l = 0; l < c.layers.length; l++) {
+      var la = c.layers[l], lb = other.layers[l];
+      if (!lb || la.inDim !== lb.inDim || la.outDim !== lb.outDim) {
+        throw new Error('crossover requires matching topology');
+      }
+      for (var j = 0; j < la.outDim; j++) {
+        if (rnd() < 0.5) continue;
+        for (var k = 0; k < la.inDim; k++) {
+          la.w[k * la.outDim + j] = lb.w[k * la.outDim + j];
+        }
+        la.b[j] = lb.b[j];
+        la.acts[j] = lb.acts[j];
+      }
+    }
+    return c;
+  };
+
   FieldNet.prototype.weightCount = function () {
     return this.layers.reduce(function (a, la) { return a + la.w.length + la.b.length; }, 0);
   };
@@ -992,6 +1122,115 @@ input[type=range]::-moz-range-thumb {
     ACTS: ACTS,
     FieldNet: FieldNet,
     Classifier: Classifier
+  };
+})(window.NW = window.NW || {});
+</script>
+<script>
+/*
+ * evo.js — tournament evolution.
+ *
+ * The offspring gallery is single-parent: mutate, pick, repeat. A tournament is
+ * the full genetic loop: a population of six, head-to-head duels the user
+ * judges, and a next generation *bred* from the winners — crossover between two
+ * parents, then mutation, with the mutation size decaying each generation so
+ * the line converges on what keeps getting picked instead of wandering.
+ *
+ * Everything here is a pure function of (base network, master seed, the picks).
+ * That is what makes an evolved champion sharable: the whole tournament
+ * serialises to one lineage entry {t: seed, p: picks} a few dozen bytes long,
+ * and replays bit-identically from a URL.
+ *
+ * One generation is four picks:
+ *   three duels     (0|1) over the pairs (0,1) (2,3) (4,5)
+ *   one final       (0|1|2) choosing the champion among the three winners
+ *
+ * The next population is then:
+ *   0  the champion, unchanged (elitism — you can never lose what you liked)
+ *   1  champion × runner-up A, lightly mutated
+ *   2  champion × runner-up B, lightly mutated
+ *   3  runner-up A × runner-up B, lightly mutated
+ *   4  champion mutated at this generation's sigma
+ *   5  champion mutated hard — the wildcard that keeps exploration alive
+ */
+(function (NW) {
+  'use strict';
+
+  var rand = NW.rand;
+
+  var POP = 6;
+  var PAIRS = [[0, 1], [2, 3], [4, 5]];
+  var PICKS_PER_GEN = 4;
+
+  /* Generation-0 spread: from a nudge to a different animal. */
+  var INIT_SIGMA = [0.1, 0.16, 0.22, 0.3, 0.42];
+
+  /* Simulated annealing, roughly: coarse search first, fine tuning later. */
+  function sigmaFor(gen) {
+    return Math.max(0.045, 0.2 * Math.pow(0.8, gen));
+  }
+
+  function initial(base, seed) {
+    var rnd = rand.rng(seed >>> 0);
+    var pop = [base.clone()];
+    for (var i = 0; i < POP - 1; i++) {
+      pop.push(base.mutate((rnd() * 4294967295) >>> 0, INIT_SIGMA[i]));
+    }
+    return pop;
+  }
+
+  /* winners: the three duel winners; champIdx: which of them won the final. */
+  function breed(winners, champIdx, seed, gen) {
+    var rnd = rand.rng((seed ^ Math.imul(gen + 1, 2654435761)) >>> 0);
+    function s() { return (rnd() * 4294967295) >>> 0; }
+    var champ = winners[champIdx];
+    var a = winners[(champIdx + 1) % 3];
+    var b = winners[(champIdx + 2) % 3];
+    var sg = sigmaFor(gen);
+    return [
+      champ.clone(),
+      champ.crossover(a, s()).mutate(s(), sg * 0.5),
+      champ.crossover(b, s()).mutate(s(), sg * 0.5),
+      a.crossover(b, s()).mutate(s(), sg * 0.5),
+      champ.mutate(s(), sg),
+      champ.mutate(s(), sg * 1.9)
+    ];
+  }
+
+  function winnersOf(pop, picks, off) {
+    return [
+      pop[PAIRS[0][picks[off] & 1]],
+      pop[PAIRS[1][picks[off + 1] & 1]],
+      pop[PAIRS[2][picks[off + 2] & 1]]
+    ];
+  }
+
+  /*
+   * Replay a recorded tournament from a base network. Returns the champion of
+   * the last complete generation — the base itself if none completed. This is
+   * the function buildNet calls when it meets a {t, p} lineage entry.
+   */
+  function replay(base, seed, picks) {
+    var pop = initial(base, seed);
+    var champ = base;
+    var gen = 0;
+    for (var off = 0; off + PICKS_PER_GEN <= picks.length; off += PICKS_PER_GEN, gen++) {
+      var w = winnersOf(pop, picks, off);
+      var f = Math.min(2, picks[off + 3] | 0);
+      champ = w[f];
+      pop = breed(w, f, seed, gen);
+    }
+    return champ;
+  }
+
+  NW.evo = {
+    POP: POP,
+    PAIRS: PAIRS,
+    PICKS_PER_GEN: PICKS_PER_GEN,
+    sigmaFor: sigmaFor,
+    initial: initial,
+    breed: breed,
+    winnersOf: winnersOf,
+    replay: replay
   };
 })(window.NW = window.NW || {});
 </script>
@@ -1286,7 +1525,9 @@ input[type=range]::-moz-range-thumb {
       depth: spec.depth,
       width: spec.width,
       gain: spec.gain,
-      lineage: spec.lineage.map(function (s) { return s.slice(); }),
+      lineage: spec.lineage.map(function (s) {
+        return s.t != null ? { t: s.t, p: s.p.slice() } : s.slice();
+      }),
       z: spec.z.slice(),
       scale: spec.scale,
       sea: spec.sea,
@@ -1299,7 +1540,9 @@ input[type=range]::-moz-range-thumb {
   function specKey(spec) {
     return [
       spec.seed, spec.depth, spec.width, spec.gain.toFixed(3),
-      spec.lineage.map(function (s) { return s[0] + ':' + s[1]; }).join(','),
+      spec.lineage.map(function (s) {
+        return s.t != null ? 'T' + s.t + ':' + s.p.join('') : s[0] + ':' + s[1];
+      }).join(','),
       spec.z.map(function (v) { return v.toFixed(4); }).join(','),
       spec.scale, spec.sea.toFixed(4), spec.auth.toFixed(4), spec.rivers.toFixed(3)
     ].join('|');
@@ -1310,9 +1553,13 @@ input[type=range]::-moz-range-thumb {
     for (var i = 0; i < spec.depth; i++) sizes.push(spec.width);
     sizes.push(OUT_DIM);
     var net = new NW.nn.FieldNet(IN_DIM, sizes, NW.rand.hashString(spec.seed), spec.gain);
-    /* Replay the mutation lineage: this is what makes an evolved world sharable. */
+    /* Replay the lineage: this is what makes an evolved world sharable. A step
+     * is either a mutation [seed, sigma] or a whole recorded tournament
+     * {t: seed, p: picks}, which NW.evo.replay expands into its champion. */
     for (var m = 0; m < spec.lineage.length; m++) {
-      net = net.mutate(spec.lineage[m][0] >>> 0, spec.lineage[m][1]);
+      var st = spec.lineage[m];
+      if (st.t != null) net = NW.evo.replay(net, st.t >>> 0, st.p || []);
+      else net = net.mutate(st[0] >>> 0, st[1]);
     }
     return net;
   }
@@ -1324,11 +1571,13 @@ input[type=range]::-moz-range-thumb {
    * ruinous when a slider fires sixty input events a second. So interactions
    * borrow the previous world's statistics and re-measure when the drag ends.
    */
-  function World(spec, classifier, reuseNorm, normSamples) {
+  function World(spec, classifier, reuseNorm, normSamples, netOverride) {
     this.spec = cloneSpec(spec);
-    this.key = specKey(this.spec);
+    this.key = specKey(this.spec) + (netOverride ? '|live' : '');
     this.classifier = classifier;
-    this.net = buildNet(this.spec);
+    /* Tournament thumbnails hold their individuals as live networks, not as
+     * replayable lineage — the override skips the rebuild for those. */
+    this.net = netOverride || buildNet(this.spec);
     var s = NW.rand.hashString(this.spec.seed);
     this.noiseA = new NW.rand.Noise(s ^ 0x1b873593);
     this.noiseB = new NW.rand.Noise(s ^ 0x85ebca6b);
@@ -2556,7 +2805,9 @@ input[type=range]::-moz-range-thumb {
       l: +spec.sea.toFixed(3),
       a: +spec.auth.toFixed(3),
       r: +spec.rivers.toFixed(3),
-      m: spec.lineage.map(function (st) { return [st[0], +st[1].toFixed(3)]; })
+      m: spec.lineage.map(function (st) {
+        return st.t != null ? { t: st.t, p: st.p } : [st[0], +st[1].toFixed(3)];
+      })
     };
     return encodeURIComponent(JSON.stringify(o));
   }
@@ -2575,6 +2826,13 @@ input[type=range]::-moz-range-thumb {
       if (o.r !== undefined) spec.rivers = clamp(+o.r, 0, 6);
       if (Array.isArray(o.m)) {
         spec.lineage = o.m.slice(0, 64).map(function (st) {
+          if (st && st.t != null) {
+            var p = Array.isArray(st.p)
+              ? st.p.slice(0, 400).map(function (v) { return clamp(v | 0, 0, 2); })
+              : [];
+            p.length -= p.length % 4;   /* only complete generations replay */
+            return { t: st.t >>> 0, p: p };
+          }
           return [st[0] >>> 0, clamp(+st[1] || 0, 0, 2)];
         });
       }
@@ -2628,6 +2886,7 @@ input[type=range]::-moz-range-thumb {
     candidates: [],
     candQueue: [],
     candJob: null,
+    tour: null,
     mm: null,
     mmJob: null,
     keys: {},
@@ -3237,6 +3496,14 @@ input[type=range]::-moz-range-thumb {
     }
     if (!app.world) return;
 
+    /* While the tournament overlay covers the map, the only work that matters
+     * is its thumbnails; skip the map entirely (and save phone batteries). */
+    if (app.tour) {
+      app.lastFrame = now;
+      tourPump();
+      return;
+    }
+
     var dt = app.lastFrame ? Math.min(0.1, (now - app.lastFrame) / 1000) : 0.016;
     app.lastFrame = now;
     app.fps = app.fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
@@ -3430,6 +3697,19 @@ input[type=range]::-moz-range-thumb {
     $('btnDrift').addEventListener('click', toggleDrift);
 
     $('btnSpawn').addEventListener('click', spawnCandidates);
+    $('btnTour').addEventListener('click', function () {
+      $('panel').classList.remove('open');
+      tourOpen();
+    });
+    $('tourClose').addEventListener('click', tourClose);
+    $('tourCards').addEventListener('click', function (e) {
+      var card = e.target.closest ? e.target.closest('.tour-card') : null;
+      if (card && app.tour && app.tour.phase !== 'rest') tourPick(parseInt(card.dataset.idx, 10));
+    });
+    $('tourFoot').addEventListener('click', function (e) {
+      if (e.target.id === 'tourKeep') tourNextGen();
+      if (e.target.id === 'tourAdopt') tourAdopt();
+    });
     $('btnBack').addEventListener('click', function () {
       if (!app.spec.lineage.length) return;
       app.spec.lineage.pop();
@@ -3534,19 +3814,67 @@ input[type=range]::-moz-range-thumb {
     $('zoomIn').addEventListener('click', function () { zoomBy(1.35); });
     $('zoomOut').addEventListener('click', function () { zoomBy(1 / 1.35); });
 
-    /* mouse / touch */
+    /*
+     * Mouse and touch, unified through pointer events. One pointer drags; a
+     * second turns the gesture into a pinch, anchored so the terrain between
+     * the fingers stays between the fingers. A touch tap (no drag) inspects the
+     * tile — the tooltip and forward-pass panel have no hover on a phone
+     * otherwise. touch-action: none in the CSS keeps the browser's own pan and
+     * double-tap zoom from fighting all of this.
+     */
+    var pts = new Map();
     var dragging = false, lastX = 0, lastY = 0, moved = 0;
+    var pinch = null;
+
+    function ptsArr() { return Array.from(pts.values()); }
+
+    function startPinch() {
+      var a = ptsArr();
+      var r = map.getBoundingClientRect();
+      var mx = (a[0].x + a[1].x) / 2 - r.left;
+      var my = (a[0].y + a[1].y) / 2 - r.top;
+      var vp = viewport();
+      return {
+        d0: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1,
+        t0: app.cam.tilePx,
+        wx: vp.left + mx / app.cam.tilePx,
+        wy: vp.top + my / app.cam.tilePx
+      };
+    }
+
     map.addEventListener('pointerdown', function (e) {
-      dragging = true;
-      moved = 0;
-      lastX = e.clientX;
-      lastY = e.clientY;
-      map.classList.add('dragging');
-      map.setPointerCapture(e.pointerId);
+      /* Synthetic pointer ids (tests, some stylus drivers) can be uncapturable. */
+      try { map.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 1) {
+        dragging = true;
+        moved = 0;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        map.classList.add('dragging');
+      } else if (pts.size === 2) {
+        dragging = false;
+        pinch = startPinch();
+      }
     });
+
     map.addEventListener('pointermove', function (e) {
+      if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       var r = map.getBoundingClientRect();
       app.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+
+      if (pinch && pts.size >= 2) {
+        var a = ptsArr();
+        var d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1;
+        app.cam.tilePx = clamp(pinch.t0 * d / pinch.d0, 3, 34);
+        /* Re-anchor: the world point that started under the midpoint follows it. */
+        var mx = (a[0].x + a[1].x) / 2 - r.left;
+        var my = (a[0].y + a[1].y) / 2 - r.top;
+        app.cam.x = pinch.wx - mx / app.cam.tilePx + (cssW / app.cam.tilePx) / 2;
+        app.cam.y = pinch.wy - my / app.cam.tilePx + (cssH / app.cam.tilePx) / 2;
+        moved = 99;
+        return;
+      }
       if (dragging) {
         var dx = e.clientX - lastX, dy = e.clientY - lastY;
         moved += Math.abs(dx) + Math.abs(dy);
@@ -3556,13 +3884,33 @@ input[type=range]::-moz-range-thumb {
         lastY = e.clientY;
       }
     });
-    function endDrag() {
-      dragging = false;
-      map.classList.remove('dragging');
+
+    function endPointer(e) {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+      if (pts.size === 1) {
+        /* Two fingers down to one: carry on as a drag from where it is. */
+        var a = ptsArr()[0];
+        dragging = true;
+        lastX = a.x;
+        lastY = a.y;
+        return;
+      }
+      if (pts.size === 0) {
+        if (moved < 8 && e.pointerType !== 'mouse' && e.type === 'pointerup') {
+          var r = map.getBoundingClientRect();
+          app.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+          app.hoverTick = 0;   /* inspect the tapped tile right away */
+        }
+        dragging = false;
+        map.classList.remove('dragging');
+      }
     }
-    map.addEventListener('pointerup', endDrag);
-    map.addEventListener('pointercancel', endDrag);
-    map.addEventListener('pointerleave', function () {
+    map.addEventListener('pointerup', endPointer);
+    map.addEventListener('pointercancel', endPointer);
+    map.addEventListener('pointerleave', function (e) {
+      /* A finger lifting fires pointerleave too; only a mouse actually left. */
+      if (e.pointerType !== 'mouse') return;
       app.hover = null;
       $('tooltip').classList.add('hidden');
     });
@@ -3592,6 +3940,16 @@ input[type=range]::-moz-range-thumb {
     window.addEventListener('keydown', function (e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       var k = e.key.toLowerCase();
+      /* Inside the tournament the keyboard belongs to it: 1/2/3 pick, Esc leaves. */
+      if (app.tour) {
+        if (k === 'escape') tourClose();
+        if (k >= '1' && k <= '3' && app.tour.phase !== 'rest') {
+          var cardsEls = $('tourCards').children;
+          var ci = parseInt(k, 10) - 1;
+          if (cardsEls[ci]) tourPick(parseInt(cardsEls[ci].dataset.idx, 10));
+        }
+        return;
+      }
       /* A focused button fires its own click on space; do not toggle twice. */
       if (k === ' ' && e.target.tagName === 'BUTTON') return;
       if (k === 'w' || k === 'arrowup') app.keys.w = true;
@@ -3704,6 +4062,204 @@ input[type=range]::-moz-range-thumb {
     for (var i = 0; i < kids.length; i++) {
       kids[i].className = (+kids[i].dataset.neuron === app.probe.neuron) ? 'sel' : '';
     }
+  }
+
+  /* --------------------------------------------------------- tournament --- */
+
+  /*
+   * The controller owns only presentation state; every genetic operation lives
+   * in evo.js so that the replay in world.js is, by construction, the same code
+   * path the user clicked through. The overlay records picks; picks ARE the
+   * genome of the champion.
+   */
+  /*
+   * No supersampling here, unlike the other stills: a duel card is ~300 CSS px,
+   * so 144 native pixels point-sampled (octaves already Nyquist-dropped) then
+   * box-blurred looks as good as 132 supersampled — at 40% of the cost, which
+   * is the difference between cards that fill in a second and cards you wait on.
+   */
+  var TOUR_PX = 144, TOUR_SS = 1;
+
+  function tourOpen() {
+    var seed = (NW.rand.rng((performance.now() * 1000) | 0)() * 4294967295) >>> 0;
+    var t = {
+      seed: seed,
+      picks: [],
+      gen: 0,
+      duel: 0,
+      phase: 'duel',
+      winners: [],        /* winner population indices for the current gen */
+      champIdx: -1,
+      startSpec: NW.world.cloneSpec(app.spec),
+      pop: NW.evo.initial(app.world.net, seed),
+      thumbs: [],
+      jobs: []
+    };
+    app.tour = t;
+    tourSpawnThumbs();
+    tourRender();
+    $('tour').classList.remove('hidden');
+  }
+
+  function tourClose() {
+    app.tour = null;
+    $('tour').classList.add('hidden');
+  }
+
+  /* One thumbnail world+canvas per individual; rendered in bands like the rest. */
+  function tourSpawnThumbs() {
+    var t = app.tour;
+    var span = t.startSpec.scale * 2.4;
+    t.thumbs = [];
+    t.jobs = [];
+    for (var i = 0; i < t.pop.length; i++) {
+      var cv = document.createElement('canvas');
+      cv.width = cv.height = TOUR_PX;
+      t.thumbs.push(cv);
+      t.jobs.push({
+        world: new NW.world.World(t.startSpec, app.trainer.net, null, 768, t.pop[i]),
+        canvas: cv,
+        x0: Math.round(app.cam.x - span / 2),
+        y0: Math.round(app.cam.y - span / 2),
+        sub: span / (TOUR_PX * TOUR_SS),
+        row: 0
+      });
+    }
+  }
+
+  /* Which individuals are on screen right now — those thumbnails render first. */
+  function tourVisible() {
+    var t = app.tour;
+    if (t.phase === 'duel') return NW.evo.PAIRS[t.duel].slice();
+    if (t.phase === 'final') return t.winners.slice();
+    return [t.winners[t.champIdx]];
+  }
+
+  function tourPump() {
+    var t = app.tour;
+    if (!t) return;
+    /* The map is not rendering while the overlay is up, so its whole frame
+     * budget goes to the thumbnails. */
+    var end = performance.now() + 24;
+    var vis = tourVisible();
+    var order = vis.slice();
+    for (var i = 0; i < t.jobs.length; i++) if (order.indexOf(i) < 0) order.push(i);
+    while (performance.now() < end) {
+      /* Among what is on screen, feed the least-finished thumbnail, so both
+       * duel cards fill together instead of one completing while the other is
+       * still blank; off-screen ones queue behind. */
+      var job = null;
+      for (var o = 0; o < order.length; o++) {
+        var j = t.jobs[order[o]];
+        if (!j || j.row >= TOUR_PX * TOUR_SS) continue;
+        if (o < vis.length) {
+          if (!job || j.row < job.row) job = j;
+        } else {
+          if (!job) job = j;
+          break;
+        }
+      }
+      if (!job) return;
+      var n = TOUR_PX * TOUR_SS;
+      var rows = clamp(Math.round(samplesFor(11, 400, 20000) / n), TOUR_SS, n);
+      rows -= rows % TOUR_SS;
+      rows = Math.min(Math.max(rows, TOUR_SS), n - job.row);
+      var region = job.world.buildRegion(job.x0, job.y0 + job.row * job.sub, n, rows, job.sub);
+      var band = NW.render.regionToCanvas(region, TOUR_SS, null);
+      job.canvas.getContext('2d').drawImage(band, 0, job.row / TOUR_SS);
+      job.row += rows;
+      if (job.row >= n) NW.render.blurCanvas(job.canvas);
+    }
+  }
+
+  function tourCard(popIdx, label, extraClass) {
+    var t = app.tour;
+    var card = document.createElement('div');
+    card.className = 'tour-card' + (extraClass ? ' ' + extraClass : '');
+    card.dataset.idx = popIdx;
+    card.appendChild(t.thumbs[popIdx]);
+    var lab = document.createElement('div');
+    lab.className = 'lab';
+    lab.textContent = label;
+    card.appendChild(lab);
+    return card;
+  }
+
+  function tourRender() {
+    var t = app.tour;
+    var cards = $('tourCards');
+    var foot = $('tourFoot');
+    cards.innerHTML = '';
+    foot.innerHTML = '';
+    $('tourInfo').textContent = 'generation ' + (t.gen + 1) +
+      ' · σ ' + NW.evo.sigmaFor(t.gen).toFixed(2);
+
+    if (t.phase === 'duel') {
+      $('tourPrompt').innerHTML = 'Duel ' + (t.duel + 1) + ' of 3 — <b>tap the world you prefer</b>';
+      var pair = NW.evo.PAIRS[t.duel];
+      cards.appendChild(tourCard(pair[0], t.gen === 0 && pair[0] === 0 ? 'current world' : 'contender 1'));
+      cards.appendChild(tourCard(pair[1], 'contender 2'));
+    } else if (t.phase === 'final') {
+      $('tourPrompt').innerHTML = 'Final — <b>crown this generation\u2019s champion</b>';
+      for (var i = 0; i < 3; i++) cards.appendChild(tourCard(t.winners[i], 'winner ' + (i + 1)));
+    } else {
+      $('tourPrompt').innerHTML = 'Champion of generation ' + (t.gen + 1) +
+        ' — breed from it, or adopt it as the world';
+      cards.appendChild(tourCard(t.winners[t.champIdx], 'champion', 'champ'));
+      var note = document.createElement('div');
+      note.className = 'tour-foot-note';
+      note.textContent = 'next generation: champion kept + 3 crossbreeds of the winners + 2 mutants';
+      foot.appendChild(note);
+      var keep = document.createElement('button');
+      keep.className = 'btn';
+      keep.id = 'tourKeep';
+      keep.textContent = '\u21bb breed the next generation';
+      foot.appendChild(keep);
+      var adopt = document.createElement('button');
+      adopt.className = 'btn on';
+      adopt.id = 'tourAdopt';
+      adopt.textContent = '\u2713 adopt this champion';
+      foot.appendChild(adopt);
+    }
+  }
+
+  function tourPick(popIdx) {
+    var t = app.tour;
+    if (t.phase === 'duel') {
+      var pair = NW.evo.PAIRS[t.duel];
+      var side = popIdx === pair[1] ? 1 : 0;
+      t.picks.push(side);
+      t.winners.push(pair[side]);
+      t.duel++;
+      t.phase = t.duel >= 3 ? 'final' : 'duel';
+    } else if (t.phase === 'final') {
+      var f = Math.max(0, t.winners.indexOf(popIdx));
+      t.picks.push(f);
+      t.champIdx = f;
+      t.phase = 'rest';
+    }
+    tourRender();
+  }
+
+  function tourNextGen() {
+    var t = app.tour;
+    var w = [t.pop[t.winners[0]], t.pop[t.winners[1]], t.pop[t.winners[2]]];
+    t.pop = NW.evo.breed(w, t.champIdx, t.seed, t.gen);
+    t.gen++;
+    t.duel = 0;
+    t.winners = [];
+    t.champIdx = -1;
+    t.phase = 'duel';
+    tourSpawnThumbs();
+    tourRender();
+  }
+
+  function tourAdopt() {
+    var t = app.tour;
+    app.spec = NW.world.cloneSpec(t.startSpec);
+    app.spec.lineage.push({ t: t.seed, p: t.picks.slice() });
+    tourClose();
+    rebuildWorld(true);
   }
 
   function buildLegend() {

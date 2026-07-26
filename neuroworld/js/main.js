@@ -28,6 +28,7 @@
     candidates: [],
     candQueue: [],
     candJob: null,
+    tour: null,
     mm: null,
     mmJob: null,
     keys: {},
@@ -637,6 +638,14 @@
     }
     if (!app.world) return;
 
+    /* While the tournament overlay covers the map, the only work that matters
+     * is its thumbnails; skip the map entirely (and save phone batteries). */
+    if (app.tour) {
+      app.lastFrame = now;
+      tourPump();
+      return;
+    }
+
     var dt = app.lastFrame ? Math.min(0.1, (now - app.lastFrame) / 1000) : 0.016;
     app.lastFrame = now;
     app.fps = app.fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
@@ -830,6 +839,19 @@
     $('btnDrift').addEventListener('click', toggleDrift);
 
     $('btnSpawn').addEventListener('click', spawnCandidates);
+    $('btnTour').addEventListener('click', function () {
+      $('panel').classList.remove('open');
+      tourOpen();
+    });
+    $('tourClose').addEventListener('click', tourClose);
+    $('tourCards').addEventListener('click', function (e) {
+      var card = e.target.closest ? e.target.closest('.tour-card') : null;
+      if (card && app.tour && app.tour.phase !== 'rest') tourPick(parseInt(card.dataset.idx, 10));
+    });
+    $('tourFoot').addEventListener('click', function (e) {
+      if (e.target.id === 'tourKeep') tourNextGen();
+      if (e.target.id === 'tourAdopt') tourAdopt();
+    });
     $('btnBack').addEventListener('click', function () {
       if (!app.spec.lineage.length) return;
       app.spec.lineage.pop();
@@ -934,19 +956,67 @@
     $('zoomIn').addEventListener('click', function () { zoomBy(1.35); });
     $('zoomOut').addEventListener('click', function () { zoomBy(1 / 1.35); });
 
-    /* mouse / touch */
+    /*
+     * Mouse and touch, unified through pointer events. One pointer drags; a
+     * second turns the gesture into a pinch, anchored so the terrain between
+     * the fingers stays between the fingers. A touch tap (no drag) inspects the
+     * tile — the tooltip and forward-pass panel have no hover on a phone
+     * otherwise. touch-action: none in the CSS keeps the browser's own pan and
+     * double-tap zoom from fighting all of this.
+     */
+    var pts = new Map();
     var dragging = false, lastX = 0, lastY = 0, moved = 0;
+    var pinch = null;
+
+    function ptsArr() { return Array.from(pts.values()); }
+
+    function startPinch() {
+      var a = ptsArr();
+      var r = map.getBoundingClientRect();
+      var mx = (a[0].x + a[1].x) / 2 - r.left;
+      var my = (a[0].y + a[1].y) / 2 - r.top;
+      var vp = viewport();
+      return {
+        d0: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1,
+        t0: app.cam.tilePx,
+        wx: vp.left + mx / app.cam.tilePx,
+        wy: vp.top + my / app.cam.tilePx
+      };
+    }
+
     map.addEventListener('pointerdown', function (e) {
-      dragging = true;
-      moved = 0;
-      lastX = e.clientX;
-      lastY = e.clientY;
-      map.classList.add('dragging');
-      map.setPointerCapture(e.pointerId);
+      /* Synthetic pointer ids (tests, some stylus drivers) can be uncapturable. */
+      try { map.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 1) {
+        dragging = true;
+        moved = 0;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        map.classList.add('dragging');
+      } else if (pts.size === 2) {
+        dragging = false;
+        pinch = startPinch();
+      }
     });
+
     map.addEventListener('pointermove', function (e) {
+      if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       var r = map.getBoundingClientRect();
       app.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+
+      if (pinch && pts.size >= 2) {
+        var a = ptsArr();
+        var d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1;
+        app.cam.tilePx = clamp(pinch.t0 * d / pinch.d0, 3, 34);
+        /* Re-anchor: the world point that started under the midpoint follows it. */
+        var mx = (a[0].x + a[1].x) / 2 - r.left;
+        var my = (a[0].y + a[1].y) / 2 - r.top;
+        app.cam.x = pinch.wx - mx / app.cam.tilePx + (cssW / app.cam.tilePx) / 2;
+        app.cam.y = pinch.wy - my / app.cam.tilePx + (cssH / app.cam.tilePx) / 2;
+        moved = 99;
+        return;
+      }
       if (dragging) {
         var dx = e.clientX - lastX, dy = e.clientY - lastY;
         moved += Math.abs(dx) + Math.abs(dy);
@@ -956,13 +1026,33 @@
         lastY = e.clientY;
       }
     });
-    function endDrag() {
-      dragging = false;
-      map.classList.remove('dragging');
+
+    function endPointer(e) {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+      if (pts.size === 1) {
+        /* Two fingers down to one: carry on as a drag from where it is. */
+        var a = ptsArr()[0];
+        dragging = true;
+        lastX = a.x;
+        lastY = a.y;
+        return;
+      }
+      if (pts.size === 0) {
+        if (moved < 8 && e.pointerType !== 'mouse' && e.type === 'pointerup') {
+          var r = map.getBoundingClientRect();
+          app.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+          app.hoverTick = 0;   /* inspect the tapped tile right away */
+        }
+        dragging = false;
+        map.classList.remove('dragging');
+      }
     }
-    map.addEventListener('pointerup', endDrag);
-    map.addEventListener('pointercancel', endDrag);
-    map.addEventListener('pointerleave', function () {
+    map.addEventListener('pointerup', endPointer);
+    map.addEventListener('pointercancel', endPointer);
+    map.addEventListener('pointerleave', function (e) {
+      /* A finger lifting fires pointerleave too; only a mouse actually left. */
+      if (e.pointerType !== 'mouse') return;
       app.hover = null;
       $('tooltip').classList.add('hidden');
     });
@@ -992,6 +1082,16 @@
     window.addEventListener('keydown', function (e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       var k = e.key.toLowerCase();
+      /* Inside the tournament the keyboard belongs to it: 1/2/3 pick, Esc leaves. */
+      if (app.tour) {
+        if (k === 'escape') tourClose();
+        if (k >= '1' && k <= '3' && app.tour.phase !== 'rest') {
+          var cardsEls = $('tourCards').children;
+          var ci = parseInt(k, 10) - 1;
+          if (cardsEls[ci]) tourPick(parseInt(cardsEls[ci].dataset.idx, 10));
+        }
+        return;
+      }
       /* A focused button fires its own click on space; do not toggle twice. */
       if (k === ' ' && e.target.tagName === 'BUTTON') return;
       if (k === 'w' || k === 'arrowup') app.keys.w = true;
@@ -1104,6 +1204,204 @@
     for (var i = 0; i < kids.length; i++) {
       kids[i].className = (+kids[i].dataset.neuron === app.probe.neuron) ? 'sel' : '';
     }
+  }
+
+  /* --------------------------------------------------------- tournament --- */
+
+  /*
+   * The controller owns only presentation state; every genetic operation lives
+   * in evo.js so that the replay in world.js is, by construction, the same code
+   * path the user clicked through. The overlay records picks; picks ARE the
+   * genome of the champion.
+   */
+  /*
+   * No supersampling here, unlike the other stills: a duel card is ~300 CSS px,
+   * so 144 native pixels point-sampled (octaves already Nyquist-dropped) then
+   * box-blurred looks as good as 132 supersampled — at 40% of the cost, which
+   * is the difference between cards that fill in a second and cards you wait on.
+   */
+  var TOUR_PX = 144, TOUR_SS = 1;
+
+  function tourOpen() {
+    var seed = (NW.rand.rng((performance.now() * 1000) | 0)() * 4294967295) >>> 0;
+    var t = {
+      seed: seed,
+      picks: [],
+      gen: 0,
+      duel: 0,
+      phase: 'duel',
+      winners: [],        /* winner population indices for the current gen */
+      champIdx: -1,
+      startSpec: NW.world.cloneSpec(app.spec),
+      pop: NW.evo.initial(app.world.net, seed),
+      thumbs: [],
+      jobs: []
+    };
+    app.tour = t;
+    tourSpawnThumbs();
+    tourRender();
+    $('tour').classList.remove('hidden');
+  }
+
+  function tourClose() {
+    app.tour = null;
+    $('tour').classList.add('hidden');
+  }
+
+  /* One thumbnail world+canvas per individual; rendered in bands like the rest. */
+  function tourSpawnThumbs() {
+    var t = app.tour;
+    var span = t.startSpec.scale * 2.4;
+    t.thumbs = [];
+    t.jobs = [];
+    for (var i = 0; i < t.pop.length; i++) {
+      var cv = document.createElement('canvas');
+      cv.width = cv.height = TOUR_PX;
+      t.thumbs.push(cv);
+      t.jobs.push({
+        world: new NW.world.World(t.startSpec, app.trainer.net, null, 768, t.pop[i]),
+        canvas: cv,
+        x0: Math.round(app.cam.x - span / 2),
+        y0: Math.round(app.cam.y - span / 2),
+        sub: span / (TOUR_PX * TOUR_SS),
+        row: 0
+      });
+    }
+  }
+
+  /* Which individuals are on screen right now — those thumbnails render first. */
+  function tourVisible() {
+    var t = app.tour;
+    if (t.phase === 'duel') return NW.evo.PAIRS[t.duel].slice();
+    if (t.phase === 'final') return t.winners.slice();
+    return [t.winners[t.champIdx]];
+  }
+
+  function tourPump() {
+    var t = app.tour;
+    if (!t) return;
+    /* The map is not rendering while the overlay is up, so its whole frame
+     * budget goes to the thumbnails. */
+    var end = performance.now() + 24;
+    var vis = tourVisible();
+    var order = vis.slice();
+    for (var i = 0; i < t.jobs.length; i++) if (order.indexOf(i) < 0) order.push(i);
+    while (performance.now() < end) {
+      /* Among what is on screen, feed the least-finished thumbnail, so both
+       * duel cards fill together instead of one completing while the other is
+       * still blank; off-screen ones queue behind. */
+      var job = null;
+      for (var o = 0; o < order.length; o++) {
+        var j = t.jobs[order[o]];
+        if (!j || j.row >= TOUR_PX * TOUR_SS) continue;
+        if (o < vis.length) {
+          if (!job || j.row < job.row) job = j;
+        } else {
+          if (!job) job = j;
+          break;
+        }
+      }
+      if (!job) return;
+      var n = TOUR_PX * TOUR_SS;
+      var rows = clamp(Math.round(samplesFor(11, 400, 20000) / n), TOUR_SS, n);
+      rows -= rows % TOUR_SS;
+      rows = Math.min(Math.max(rows, TOUR_SS), n - job.row);
+      var region = job.world.buildRegion(job.x0, job.y0 + job.row * job.sub, n, rows, job.sub);
+      var band = NW.render.regionToCanvas(region, TOUR_SS, null);
+      job.canvas.getContext('2d').drawImage(band, 0, job.row / TOUR_SS);
+      job.row += rows;
+      if (job.row >= n) NW.render.blurCanvas(job.canvas);
+    }
+  }
+
+  function tourCard(popIdx, label, extraClass) {
+    var t = app.tour;
+    var card = document.createElement('div');
+    card.className = 'tour-card' + (extraClass ? ' ' + extraClass : '');
+    card.dataset.idx = popIdx;
+    card.appendChild(t.thumbs[popIdx]);
+    var lab = document.createElement('div');
+    lab.className = 'lab';
+    lab.textContent = label;
+    card.appendChild(lab);
+    return card;
+  }
+
+  function tourRender() {
+    var t = app.tour;
+    var cards = $('tourCards');
+    var foot = $('tourFoot');
+    cards.innerHTML = '';
+    foot.innerHTML = '';
+    $('tourInfo').textContent = 'generation ' + (t.gen + 1) +
+      ' · σ ' + NW.evo.sigmaFor(t.gen).toFixed(2);
+
+    if (t.phase === 'duel') {
+      $('tourPrompt').innerHTML = 'Duel ' + (t.duel + 1) + ' of 3 — <b>tap the world you prefer</b>';
+      var pair = NW.evo.PAIRS[t.duel];
+      cards.appendChild(tourCard(pair[0], t.gen === 0 && pair[0] === 0 ? 'current world' : 'contender 1'));
+      cards.appendChild(tourCard(pair[1], 'contender 2'));
+    } else if (t.phase === 'final') {
+      $('tourPrompt').innerHTML = 'Final — <b>crown this generation\u2019s champion</b>';
+      for (var i = 0; i < 3; i++) cards.appendChild(tourCard(t.winners[i], 'winner ' + (i + 1)));
+    } else {
+      $('tourPrompt').innerHTML = 'Champion of generation ' + (t.gen + 1) +
+        ' — breed from it, or adopt it as the world';
+      cards.appendChild(tourCard(t.winners[t.champIdx], 'champion', 'champ'));
+      var note = document.createElement('div');
+      note.className = 'tour-foot-note';
+      note.textContent = 'next generation: champion kept + 3 crossbreeds of the winners + 2 mutants';
+      foot.appendChild(note);
+      var keep = document.createElement('button');
+      keep.className = 'btn';
+      keep.id = 'tourKeep';
+      keep.textContent = '\u21bb breed the next generation';
+      foot.appendChild(keep);
+      var adopt = document.createElement('button');
+      adopt.className = 'btn on';
+      adopt.id = 'tourAdopt';
+      adopt.textContent = '\u2713 adopt this champion';
+      foot.appendChild(adopt);
+    }
+  }
+
+  function tourPick(popIdx) {
+    var t = app.tour;
+    if (t.phase === 'duel') {
+      var pair = NW.evo.PAIRS[t.duel];
+      var side = popIdx === pair[1] ? 1 : 0;
+      t.picks.push(side);
+      t.winners.push(pair[side]);
+      t.duel++;
+      t.phase = t.duel >= 3 ? 'final' : 'duel';
+    } else if (t.phase === 'final') {
+      var f = Math.max(0, t.winners.indexOf(popIdx));
+      t.picks.push(f);
+      t.champIdx = f;
+      t.phase = 'rest';
+    }
+    tourRender();
+  }
+
+  function tourNextGen() {
+    var t = app.tour;
+    var w = [t.pop[t.winners[0]], t.pop[t.winners[1]], t.pop[t.winners[2]]];
+    t.pop = NW.evo.breed(w, t.champIdx, t.seed, t.gen);
+    t.gen++;
+    t.duel = 0;
+    t.winners = [];
+    t.champIdx = -1;
+    t.phase = 'duel';
+    tourSpawnThumbs();
+    tourRender();
+  }
+
+  function tourAdopt() {
+    var t = app.tour;
+    app.spec = NW.world.cloneSpec(t.startSpec);
+    app.spec.lineage.push({ t: t.seed, p: t.picks.slice() });
+    tourClose();
+    rebuildWorld(true);
   }
 
   function buildLegend() {

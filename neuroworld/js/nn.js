@@ -170,6 +170,35 @@
     return c;
   };
 
+  /*
+   * Sexual reproduction, with the neuron as the gene: each neuron — its whole
+   * column of incoming weights, its bias, its activation function — comes from
+   * one parent or the other, never averaged. Averaging weights of two working
+   * neurons usually produces a broken one; taking whole neurons keeps each
+   * parent's features intact and lets selection decide which combination wins.
+   * Both parents descend from the same base network, so neuron positions are
+   * aligned and the swap is meaningful.
+   */
+  FieldNet.prototype.crossover = function (other, seed) {
+    var c = this.clone();
+    var rnd = rand.rng(seed >>> 0);
+    for (var l = 0; l < c.layers.length; l++) {
+      var la = c.layers[l], lb = other.layers[l];
+      if (!lb || la.inDim !== lb.inDim || la.outDim !== lb.outDim) {
+        throw new Error('crossover requires matching topology');
+      }
+      for (var j = 0; j < la.outDim; j++) {
+        if (rnd() < 0.5) continue;
+        for (var k = 0; k < la.inDim; k++) {
+          la.w[k * la.outDim + j] = lb.w[k * la.outDim + j];
+        }
+        la.b[j] = lb.b[j];
+        la.acts[j] = lb.acts[j];
+      }
+    }
+    return c;
+  };
+
   FieldNet.prototype.weightCount = function () {
     return this.layers.reduce(function (a, la) { return a + la.w.length + la.b.length; }, 0);
   };

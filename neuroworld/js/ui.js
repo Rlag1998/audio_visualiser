@@ -231,7 +231,9 @@
       l: +spec.sea.toFixed(3),
       a: +spec.auth.toFixed(3),
       r: +spec.rivers.toFixed(3),
-      m: spec.lineage.map(function (st) { return [st[0], +st[1].toFixed(3)]; })
+      m: spec.lineage.map(function (st) {
+        return st.t != null ? { t: st.t, p: st.p } : [st[0], +st[1].toFixed(3)];
+      })
     };
     return encodeURIComponent(JSON.stringify(o));
   }
@@ -250,6 +252,13 @@
       if (o.r !== undefined) spec.rivers = clamp(+o.r, 0, 6);
       if (Array.isArray(o.m)) {
         spec.lineage = o.m.slice(0, 64).map(function (st) {
+          if (st && st.t != null) {
+            var p = Array.isArray(st.p)
+              ? st.p.slice(0, 400).map(function (v) { return clamp(v | 0, 0, 2); })
+              : [];
+            p.length -= p.length % 4;   /* only complete generations replay */
+            return { t: st.t >>> 0, p: p };
+          }
           return [st[0] >>> 0, clamp(+st[1] || 0, 0, 2)];
         });
       }

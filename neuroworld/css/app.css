@@ -128,7 +128,7 @@ input[type=text]:focus, select:focus { outline: none; border-color: var(--acc); 
   overflow: hidden;
   background: #05070a;
 }
-#map { display: block; width: 100%; height: 100%; cursor: grab; }
+#map { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #map.dragging { cursor: grabbing; }
 
 #hud {
@@ -194,6 +194,81 @@ input[type=text]:focus, select:focus { outline: none; border-color: var(--acc); 
   padding: 4px 6px;
 }
 #hintClose:hover { color: var(--ink); }
+
+/* -------------------------------------------------------- tournament ---- */
+
+#tour {
+  position: fixed;
+  inset: 0;
+  z-index: 56;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  background: #070a0f;
+}
+.tour-head { display: flex; align-items: center; gap: 12px; }
+.tour-title {
+  font: 600 13px/1 var(--mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--acc);
+}
+#tourInfo { font: 11px/1.4 var(--mono); color: var(--dimmer); }
+#tourPrompt {
+  text-align: center;
+  color: var(--dim);
+  font-size: 13.5px;
+  margin: 8px 0 2px;
+}
+#tourPrompt b { color: var(--ink); font-weight: 500; }
+#tourCards {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  align-content: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.tour-card {
+  background: #0c1118;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 8px 5px;
+  cursor: pointer;
+  width: clamp(150px, min(40vh, 42vw), 330px);
+  -webkit-tap-highlight-color: transparent;
+}
+.tour-card canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: #0b0f16;
+  image-rendering: pixelated;
+}
+.tour-card .lab {
+  font: 10px/1 var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  text-align: center;
+  padding: 7px 0 3px;
+}
+.tour-card:hover { border-color: var(--acc); }
+.tour-card:active { transform: scale(.985); }
+.tour-card.champ { border-color: var(--acc2); }
+.tour-foot-note { width: 100%; text-align: center; font: 11px/1.5 var(--mono); color: var(--dimmer); }
+#tourFoot {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 8px 0 6px;
+}
+#tourFoot .btn { padding: 13px 22px; font-size: 12.5px; }
 
 /* ------------------------------------------------------------- panel ---- */
 
@@ -326,6 +401,12 @@ input[type=range]::-moz-range-thumb {
 
 .hidden { display: none !important; }
 .only-narrow { display: none; }
+
+@media (pointer: coarse) {
+  .btn { padding: 9px 13px; }
+  .row.toggles label { padding: 4px 0; }
+  input[type=range] { height: 26px; }
+}
 
 /* ------------------------------------------------------------ narrow ---- */
 

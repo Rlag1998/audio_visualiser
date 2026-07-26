@@ -20,8 +20,11 @@ biomes with an if-chain. NeuroWorld replaces both halves with neural networks:
   is drawn. Because the answer is a softmax rather than a threshold, coastlines,
   treelines and desert margins come out as gradients.
 
-And because the terrain is weights, worlds can be **bred**. Every mutation step is a
-seed, so an evolved planet is reproducible from a URL.
+And because the terrain is weights, worlds can be **bred** — including a full
+tournament mode: head-to-head duels you judge, winners crossed with each other,
+mutation shrinking each generation so the line converges on what you keep picking.
+Every mutation step is a seed and a whole tournament serialises to one ~50-byte
+lineage entry, so an evolved planet is reproducible from a URL.
 
 Settlements are read out of the same six channels — fresh water, workable ground,
 flora, ore, a tolerable climate — and named after whatever earned them the site, so
@@ -47,6 +50,10 @@ river towns come out as fords and headlands as havens.
 5. Click an **offspring** thumbnail, then another, then another. That is interactive
    evolution: each is the parent's weights plus gaussian noise, with the odd
    activation function swapped. Hit **link** and the whole lineage is in the URL.
+   For the full loop, **run a tournament**: three duels pick a generation's
+   winners, a final crowns its champion, and the next generation is the champion
+   kept unchanged plus three crossbreeds of the winners plus two mutants, with
+   mutation decaying 20% per generation. Adopt the champion whenever you're happy.
 6. Zoom in. Place names appear around 6 px/tile, props on the ground past 8. None of
    it is decoration for its own sake — every tree, cactus and town is a threshold on
    one of the network's channels.
@@ -153,10 +160,29 @@ p90 22 ms, p99 41 ms, worst 46 ms, nothing over 100 ms. Dragging a terrain dial 
 16.7 ms median; at the heaviest topology the same drag runs at ~27 fps and says so —
 the panel marks a chunk cost over 30 ms as *heavy*.
 
+### Does the tournament actually converge?
+
+Measured, not assumed. A simulated user with a fixed preference plays the same
+tournament the UI offers — six individuals, three duels, a final, breed, repeat:
+
+- Preference "look like this target world" (correlation between elevation fields
+  of the champion and a world grown from an unrelated seed): the champion gains
+  **+0.24 correlation on average over 10 generations** (3 seeds × 4 targets; every
+  strategy in a 4-way breeding sweep landed within 0.007 of this, so the scheme is
+  robust rather than tuned).
+- Preference "more land" (mean of the raw elevation channel): **0.71 → 0.97 in 8
+  generations** — broad, perceivable qualities converge fast; matching a specific
+  unseen target is the hard case and still moves steadily.
+- The recorded picks replay to a bit-identical champion, and the adopted lineage
+  entry round-trips through the permalink (`evo-test.js` in the session notes;
+  the browser test clicks through two real generations and compares field hashes).
+
 ### Reproducibility
 
 A world is entirely described by `{seed, depth, width, gain, lineage, z, scale, sea,
 authority, rivers}`, which is what the **link** button puts in the URL fragment.
+A lineage step is either a mutation `[seed, sigma]` or a recorded tournament
+`{t: seed, p: picks}` — the picks *are* the champion's genome.
 `Math.random` is never called in the generator; mutations replay from their step
 seeds. A two-step evolved lineage with a custom latent vector rebuilds bit-identically
 in a fresh tab.
@@ -166,7 +192,8 @@ in a fresh tab.
 | file | |
 |---|---|
 | `js/rng.js` | seeded PRNG, gaussians, hash-gradient Perlin noise, fbm, ridged fbm |
-| `js/nn.js` | the CPPN (batched forward, mutation, tracing) and the trainable MLP (Adam, backprop) |
+| `js/nn.js` | the CPPN (batched forward, mutation, crossover, tracing) and the trainable MLP (Adam, backprop) |
+| `js/evo.js` | tournament genetics: population, breeding, deterministic replay from picks |
 | `js/biome.js` | 16 biomes, the rule oracle, dataset synthesis, time-sliced trainer |
 | `js/world.js` | features, normalisation, hypsometry, rivers, slope, shading, chunk cache |
 | `js/render.js` | chunk rasters, colour ramps, coarse LOD downsampling, props, settlements |
@@ -188,7 +215,8 @@ Plain scripts and one stylesheet — it runs from `file://` with no toolchain.
   still do not always run downhill, and they neither merge nor reach the sea reliably.
 - Settlements are sites, not simulation: there are no roads between them, no
   populations, and nothing stops two neighbours from sharing a valley.
-- No pinch-to-zoom; touch users get the HUD zoom buttons.
+- On touch screens: pinch zooms, drag pans, a tap inspects the tile under your
+  finger, and the tournament was designed around thumb-sized targets.
 - Animating the latent vector regenerates the whole visible region every frame, at
   roughly 1/200th of screen resolution and ~17 fps. It is legibly soft, and that is
   inherent: a sharp full-screen morph would be 400 ms a frame.
