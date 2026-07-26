@@ -118,11 +118,13 @@
   }
 
   /*
-   * `reuseLut` skips the normalisation pass and adopts another world's lookup
-   * tables. Only used while the latent vector is being animated, where the
-   * distribution shifts slowly and a per-frame re-measurement is 10ms wasted.
+   * `reuseNorm` skips the normalisation pass and adopts another world's measured
+   * statistics. Measuring costs 2048 forward passes — 30ms at the default
+   * topology, 120ms at the largest — which is fine once per committed change but
+   * ruinous when a slider fires sixty input events a second. So interactions
+   * borrow the previous world's statistics and re-measure when the drag ends.
    */
-  function World(spec, classifier, reuseLut) {
+  function World(spec, classifier, reuseNorm, normSamples) {
     this.spec = cloneSpec(spec);
     this.key = specKey(this.spec);
     this.classifier = classifier;
@@ -136,8 +138,12 @@
     this.genMs = 0;
     this.genCount = 0;
     this._bufs = {};
-    if (reuseLut) this.lut = reuseLut;
-    else this.buildNormalizer();
+    if (reuseNorm) {
+      this.lut = reuseNorm.lut;
+      this.rivBeta = reuseNorm.rivBeta;
+    } else {
+      this.buildNormalizer(normSamples || NORM_SAMPLES);
+    }
   }
 
   World.prototype._buf = function (name, Type, len) {
@@ -244,8 +250,8 @@
    * exactly a level set of the network — it only fixes how those levels map onto
    * heights and climates, so every seed yields a legible world.
    */
-  World.prototype.buildNormalizer = function () {
-    var n = NORM_SAMPLES;
+  World.prototype.buildNormalizer = function (samples) {
+    var n = samples || NORM_SAMPLES;
     var X = new Float32Array(n * IN_DIM);
     var aux = new Float32Array(n * AUX);
     var rnd = NW.rand.rng(NW.rand.hashString('norm:' + this.key));
@@ -297,6 +303,11 @@
     var v0 = s00 / n - (s0 / n) * (s0 / n);
     var cov = s03 / n - (s0 / n) * (s3 / n);
     this.rivBeta = v0 > 1e-6 ? clamp(cov / v0, -1.2, 1.2) : 0;
+  };
+
+  /* The measured statistics, for another world to borrow mid-interaction. */
+  World.prototype.norm = function () {
+    return { lut: this.lut, rivBeta: this.rivBeta };
   };
 
   /* Raw channel value -> rank in [0,1], linearly interpolated between LUT bins. */

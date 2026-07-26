@@ -114,19 +114,28 @@ chunks. A chunk costs ~17 ms — 1156 CPPN forward passes, 1024 classifications,
 gradients, hillshade and rasterisation — and that number is the reason chunks are
 this size: work that cannot be interrupted has to be small enough to fit in a frame.
 
-Everything else expensive is deferred or sliced rather than done when convenient:
+Every other expensive thing is deferred, sliced, or budgeted:
 
-- Chunks not yet generated show the coarse preview instead of a black square, so
-  panning into new territory arrives blurred and then sharpens. As a backdrop the
-  preview is built at less than half the resolution it gets when it *is* the picture,
-  because its rebuild is otherwise the longest frame in a pan.
-- The minimap is 16k samples, a third of a second of work. It is built eight rows at
-  a time into a back buffer, only in frames where no chunk is waiting, and swapped in
-  when complete — so it never blanks and never stalls.
-- Offspring thumbnails (~100 ms each) wait until the visible map is finished.
+- **Budgets are in milliseconds, not samples.** A 5x48 CPPN costs six times a
+  default one, so a fixed sample count that is comfortable at the default turns
+  into a freeze at the largest topology. Each frame's coarse work is sized from a
+  running measurement of what a sample currently costs — calibrated on chunk builds
+  only, since calibrating on the preview would make the preview size itself from
+  its own last cost and drift.
+- **Chunks not yet generated show the coarse preview**, so panning into new
+  territory arrives blurred and then sharpens. As a backdrop it gets a 13 ms budget;
+  when it *is* the picture — a drag, a morph — it gets 45 ms and drops the pan
+  margin it would otherwise keep for reuse.
+- **The minimap is 16k samples**, a third of a second of work. Built a band at a
+  time into a back buffer, only in frames where no chunk is waiting, swapped in when
+  complete — so it never blanks and never stalls.
+- **Offspring thumbnails** wait until the visible map is finished, then build in
+  bands of their own.
 
 Measured while dragging the map continuously for six seconds: median frame 16.7 ms,
-p90 18.7 ms, p99 34.5 ms, worst 43.8 ms, nothing over 100 ms.
+p90 22 ms, p99 41 ms, worst 46 ms, nothing over 100 ms. Dragging a terrain dial holds
+16.7 ms median; at the heaviest topology the same drag runs at ~27 fps and says so —
+the panel marks a chunk cost over 30 ms as *heavy*.
 
 ### Reproducibility
 
@@ -163,5 +172,6 @@ Plain scripts and one stylesheet — it runs from `file://` with no toolchain.
 - Settlements are sites, not simulation: there are no roads between them, no
   populations, and nothing stops two neighbours from sharing a valley.
 - No pinch-to-zoom; touch users get the HUD zoom buttons.
-- Animating the latent vector regenerates the visible region every frame and runs
-  around 30 fps at a coarse sampling. That is the intended cost of a live morph.
+- Animating the latent vector regenerates the whole visible region every frame, at
+  roughly 1/200th of screen resolution and ~17 fps. It is legibly soft, and that is
+  inherent: a sharp full-screen morph would be 400 ms a frame.

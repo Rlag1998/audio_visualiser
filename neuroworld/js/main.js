@@ -27,11 +27,13 @@
     hoverInfo: null,
     candidates: [],
     candQueue: [],
+    candJob: null,
     mm: null,
     mmJob: null,
     keys: {},
     fps: 0,
     texSeed: 0,
+    perSample: 0,
     missing: 0,
     lastFrame: 0,
     statTick: 0,
@@ -69,9 +71,19 @@
 
   /* -------------------------------------------------------------- world --- */
 
-  function rebuildWorld(alsoCandidates) {
-    app.world = new NW.world.World(app.spec, app.trainer.net);
+  /*
+   * Swap in a world for the current spec. `reuse` borrows the previous world's
+   * normalisation instead of re-measuring it — correct enough for a preview while
+   * a control is being dragged, and the difference is measured away on release.
+   */
+  function swapWorld(reuse) {
+    app.world = new NW.world.World(app.spec, app.trainer.net,
+      reuse && app.world ? app.world.norm() : null);
     app.texSeed = NW.rand.hashString(app.world.key) ^ 0x5bf03635;
+  }
+
+  function rebuildWorld(alsoCandidates) {
+    swapWorld(false);
     app.queue.length = 0;
     /* Keep the old minimap on screen; the key check below rebuilds it in the
      * background rather than blanking the HUD on every slider release. */
@@ -95,12 +107,16 @@
     }
     var mix = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
       .map(function (k) { return k + '×' + counts[k]; }).join(' ');
+    /* A chunk is uninterruptible work; past ~30ms it no longer fits in a frame
+     * and streaming visibly lags, so say so rather than letting it feel broken. */
+    var cost = perSampleMs() * CHUNK_SAMPLES;
     NW.ui.facts($('netFacts'), [
       ['topology', sizes.join(' → ')],
       ['weights', net.weightCount()],
       ['activations', mix],
       ['mutation steps', app.spec.lineage.length],
-      ['chunk cost', app.world.genMs.toFixed(1) + ' ms / ' + (CHUNK * CHUNK) + ' tiles']
+      ['chunk cost', cost.toFixed(1) + ' ms / ' + (CHUNK * CHUNK) + ' tiles' +
+        (cost > 30 ? ' — heavy' : ''), cost > 30 ? 'warn' : '']
     ]);
   }
 
@@ -137,16 +153,31 @@
 
   /* ------------------------------------------------------------ drawing --- */
 
-  function resize() {
+  /*
+   * Measured when the stage actually changes size, not once a frame. Reading
+   * geometry every frame forces a synchronous layout of the whole document, and
+   * anything that dirties the panel — a slider label, a stat line — then makes
+   * that layout expensive. It cost 40ms a frame while dragging the latent vector.
+   */
+  function measureStage() {
+    var stage = map.parentNode;
     dpr = Math.min(2, window.devicePixelRatio || 1);
-    var r = map.parentNode.getBoundingClientRect();
-    cssW = Math.max(1, Math.floor(r.width));
-    cssH = Math.max(1, Math.floor(r.height));
+    cssW = Math.max(1, Math.floor(stage.clientWidth));
+    cssH = Math.max(1, Math.floor(stage.clientHeight));
     if (map.width !== Math.round(cssW * dpr) || map.height !== Math.round(cssH * dpr)) {
       map.width = Math.round(cssW * dpr);
       map.height = Math.round(cssH * dpr);
     }
     mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function watchStage() {
+    measureStage();
+    if (window.ResizeObserver) {
+      new ResizeObserver(measureStage).observe(map.parentNode);
+    } else {
+      window.addEventListener('resize', measureStage);
+    }
   }
 
   function viewport() {
@@ -163,13 +194,39 @@
    * viewport. Used when zoomed out past the point where chunks could stream in,
    * and while the latent vector or a terrain dial is being dragged.
    *
-   * The result is cached with a margin around the viewport, so an idle zoomed-out
-   * map costs nothing per frame and small pans reuse it. While something is
-   * animating we drop the supersampling and shrink the budget instead: motion
-   * hides the aliasing that a still image would show.
+   * The result is cached with a margin around the viewport, so small pans reuse
+   * it instead of rebuilding.
    */
   var previewCanvas = document.createElement('canvas');
   var PREVIEW_PAD = 0.16;
+
+  /*
+   * Every coarse-sampling budget in the app is expressed in milliseconds, not in
+   * samples, because the cost of a sample depends on the network the user chose:
+   * a 5x48 CPPN is six times the work of the default. Sizing these in samples
+   * meant the largest topology turned a 55ms preview into a 200ms one and a
+   * thumbnail into a 1.6-second freeze. The chunk timer is the calibration.
+   */
+  var CHUNK_SAMPLES = (CHUNK + 2) * (CHUNK + 2);
+
+  /*
+   * Calibrated only on chunk builds, which are a fixed size, and carried across
+   * world swaps because the cost per sample follows the topology rather than the
+   * world. Measuring it from the preview instead would be circular — the preview
+   * would size itself from its own last cost and drift.
+   */
+  function noteChunkCost(ms) {
+    var v = ms / CHUNK_SAMPLES;
+    app.perSample = app.perSample ? app.perSample * 0.7 + v * 0.3 : v;
+  }
+
+  function perSampleMs() {
+    return app.perSample || 17 / CHUNK_SAMPLES;
+  }
+
+  function samplesFor(ms, lo, hi) {
+    return clamp(Math.round(ms / perSampleMs()), lo, hi);
+  }
 
   /*
    * Two qualities. As a backdrop under chunks that have not arrived yet it is on
@@ -178,18 +235,34 @@
    * the picture — dragging a dial, animating z — it gets the full budget.
    */
   function previewPlan(vp, quality) {
-    var tilesW = vp.wTiles * (1 + 2 * PREVIEW_PAD);
-    var tilesH = vp.hTiles * (1 + 2 * PREVIEW_PAD);
-    var target = quality === 'backdrop' ? 2600 : 6000;
-    var step = Math.max(1, Math.round(Math.sqrt(tilesW * tilesH / target)));
-    var ss = (quality !== 'backdrop' && step >= 4) ? 2 : 1;
-    var sub = step / ss;
+    /*
+     * The margin exists so a pan can reuse the cached preview. While a control is
+     * being dragged the camera is still, so the margin is pure waste — dropping it
+     * buys back a third of the samples and spends them on resolution instead.
+     */
+    var pad = quality === 'backdrop' ? PREVIEW_PAD : 0.02;
+    var tilesW = vp.wTiles * (1 + 2 * pad);
+    var tilesH = vp.hTiles * (1 + 2 * pad);
+    var area = tilesW * tilesH;
+
+    /*
+     * Budget in samples taken, not pixels produced, and never supersampled: the
+     * preview is only ever on screen while something is moving — a drag, a morph,
+     * terrain streaming in — and motion hides the aliasing that a still image
+     * would show. Spending the budget on resolution instead is the better trade,
+     * and it is four times the pixels for the same work. (The minimap and the
+     * offspring thumbnails are stills, and those do supersample.)
+     */
+    var samples = samplesFor(quality === 'backdrop' ? 13 : 45, 800, 30000);
+    /* Fractional, because rounding the step to an integer at these scales throws
+     * away up to half the budget — sqrt(area/samples) of 2.5 becomes 3. */
+    var step = Math.max(1, Math.sqrt(area / samples));
     var w = Math.ceil(tilesW / step) + 1;
     var h = Math.ceil(tilesH / step) + 1;
     return {
-      quality: quality, step: step, sub: sub, ss: ss, w: w, h: h,
-      x0: Math.floor((vp.left - vp.wTiles * PREVIEW_PAD) / step) * step,
-      y0: Math.floor((vp.top - vp.hTiles * PREVIEW_PAD) / step) * step
+      quality: quality, step: step, sub: step, ss: 1, w: w, h: h,
+      x0: Math.floor((vp.left - vp.wTiles * pad) / step) * step,
+      y0: Math.floor((vp.top - vp.hTiles * pad) / step) * step
     };
   }
 
@@ -252,6 +325,7 @@
     while (app.queue.length && performance.now() - t0 < 11) {
       var job = app.queue.shift();
       app.world.makeChunk(job[0], job[1]);
+      noteChunkCost(app.world.genMs);
     }
 
     /* Count what is still missing on screen — the prefetch ring does not count. */
@@ -361,12 +435,19 @@
    * buffer, only in frames where no terrain chunk is waiting, and swapped in when
    * complete. The visible minimap never goes blank and nothing ever stalls.
    */
-  var MM_N = 128, MM_STEP = 5, MM_BAND = 8;
+  var MM_N = 128, MM_STEP = 5;
   var MM_SPAN = MM_N * MM_STEP;
 
-  var mmFront = document.createElement('canvas');
-  var mmBack = document.createElement('canvas');
-  mmFront.width = mmFront.height = mmBack.width = mmBack.height = MM_N;
+  function mmBuffer() {
+    var cv = document.createElement('canvas');
+    cv.width = cv.height = MM_N;
+    /* The completed buffer is read back once for the blur; the hint keeps Chrome
+     * from warning and keeps the canvas on the CPU where the readback is cheap. */
+    return { cv: cv, ctx: cv.getContext('2d', { willReadFrequently: true }) };
+  }
+
+  var mmFront = mmBuffer();
+  var mmBack = mmBuffer();
 
   function updateMinimap(vp) {
     var wantX = Math.round(app.cam.x - MM_SPAN / 2);
@@ -384,15 +465,16 @@
       if (job.key !== app.world.key) {
         app.mmJob = null;
       } else {
-        var rows = Math.min(MM_BAND, MM_N - job.row);
+        var rows = Math.min(clamp(Math.round(samplesFor(12, 300, 6000) / MM_N), 2, 24),
+          MM_N - job.row);
         var region = app.world.buildRegion(
           job.x0, job.y0 + job.row * MM_STEP, MM_N, rows, MM_STEP);
         var band = NW.render.regionToCanvas(region, 1, null, false);
-        mmBack.getContext('2d').drawImage(band, 0, job.row);
+        mmBack.ctx.drawImage(band, 0, job.row);
         job.row += rows;
         if (job.row >= MM_N) {
           /* Blur once at the end: banding a 3x3 filter would seam every band. */
-          NW.render.blurCanvas(mmBack);
+          NW.render.blurCanvas(mmBack.cv, mmBack.ctx);
           var t = mmFront;
           mmFront = mmBack;
           mmBack = t;
@@ -402,7 +484,7 @@
       }
     }
 
-    NW.ui.drawMinimap($('minimap'), mmFront, app.mm, MM_SPAN, app.cam, vp);
+    NW.ui.drawMinimap($('minimap'), mmFront.cv, app.mm, MM_SPAN, app.cam, vp);
   }
 
   /* ----------------------------------------------------------- evolution --- */
@@ -419,6 +501,7 @@
     var g = $('gallery');
     g.innerHTML = '';
     app.candQueue = [];
+    app.candJob = null;
     for (var c = 0; c < app.candidates.length; c++) {
       var cv = document.createElement('canvas');
       cv.width = CAND_PX;
@@ -437,23 +520,46 @@
   }
 
   /*
-   * One candidate thumbnail per frame. They are centred on the camera and cover a
-   * couple of feature periods, supersampled 2x — a thumbnail you cannot tell apart
-   * from its siblings is useless for choosing a parent.
+   * Thumbnails are centred on the camera and cover a couple of feature periods,
+   * supersampled 2x — a thumbnail you cannot tell apart from its siblings is
+   * useless for choosing a parent. That is 31k samples each, so like the minimap
+   * they are built a band at a time, with the band sized to the current cost of a
+   * sample. Each candidate measures its own statistics, at a third of the usual
+   * sample count: normalising a mutant against its parent's distribution would
+   * disguise exactly the change you are being asked to judge.
    */
-  var CAND_PX = 88, CAND_SS = 2;
+  var CAND_PX = 88, CAND_SS = 2, CAND_NORM = 768;
 
   function pumpCandidates() {
-    if (!app.candQueue.length) return;
-    var idx = app.candQueue.shift();
-    var cand = app.candidates[idx];
-    var w = new NW.world.World(cand.spec, app.trainer.net);
-    var span = cand.spec.scale * 2.4;
-    var sub = span / (CAND_PX * CAND_SS);
-    var region = w.buildRegion(
-      Math.round(app.cam.x - span / 2), Math.round(app.cam.y - span / 2),
-      CAND_PX * CAND_SS, CAND_PX * CAND_SS, sub);
-    NW.render.regionToCanvas(region, CAND_SS, cand.canvas);
+    if (!app.candJob) {
+      if (!app.candQueue.length) return;
+      var cand = app.candidates[app.candQueue.shift()];
+      var span = cand.spec.scale * 2.4;
+      app.candJob = {
+        cand: cand,
+        world: new NW.world.World(cand.spec, app.trainer.net, null, CAND_NORM),
+        span: span,
+        sub: span / (CAND_PX * CAND_SS),
+        row: 0
+      };
+      return;   /* building the network and its statistics is this frame's share */
+    }
+
+    var job = app.candJob;
+    var n = CAND_PX * CAND_SS;
+    var rows = clamp(Math.round(samplesFor(14, 400, 20000) / n), CAND_SS, n);
+    rows -= rows % CAND_SS;                 /* keep bands aligned to the downsample */
+    rows = Math.min(Math.max(rows, CAND_SS), n - job.row);
+
+    var region = job.world.buildRegion(
+      Math.round(app.cam.x - job.span / 2),
+      Math.round(app.cam.y - job.span / 2) + job.row * job.sub,
+      n, rows, job.sub);
+    var band = NW.render.regionToCanvas(region, CAND_SS, null);
+    job.cand.canvas.getContext('2d').drawImage(band, 0, job.row / CAND_SS);
+
+    job.row += rows;
+    if (job.row >= n) app.candJob = null;
   }
 
   function adopt(idx) {
@@ -508,7 +614,6 @@
 
   function frame(now) {
     requestAnimationFrame(frame);
-    resize();
 
     if (!app.trainer.done) {
       var was = app.trainer.pump(14);
@@ -540,7 +645,7 @@
         Math.sin(t * 0.73 + 1.1) * 1.1,
         Math.cos(t * 0.51) * 0.9,
         Math.sin(t * 0.37 + 2.2) * 0.9
-      ]);
+      ], true);
     }
 
     /*
@@ -569,7 +674,7 @@
       app.statTick = now;
       $('stats').textContent =
         'fps ' + app.fps.toFixed(0) + '   chunks ' + app.world.chunks.size +
-        '   gen ' + app.world.genMs.toFixed(1) + 'ms\n' +
+        '   gen ' + (perSampleMs() * CHUNK_SAMPLES).toFixed(1) + 'ms\n' +
         'zoom ' + app.cam.tilePx.toFixed(1) + 'px   weights ' + app.world.net.weightCount() +
         '   queue ' + app.queue.length;
       $('hudCoords').textContent =
@@ -585,41 +690,61 @@
 
   /* --------------------------------------------------------------- input --- */
 
-  function setZ(z) {
+  /*
+   * `syncInputs` writes the values back into the range inputs — needed when drift
+   * or the jump button moved them, skipped when the user is dragging one, since
+   * writing to an input mid-drag dirties layout for no visible gain.
+   */
+  function setZ(z, syncInputs) {
     app.spec.z = z;
     for (var i = 0; i < 4; i++) {
-      $('z' + i).value = z[i];
+      if (syncInputs) $('z' + i).value = z[i];
       $('vz' + i).textContent = z[i].toFixed(2);
     }
-    /* Reuse the normalisation while animating; it is re-measured when z settles. */
-    app.world = new NW.world.World(app.spec, app.trainer.net,
-      app.drift && app.world ? app.world.lut : null);
-    app.texSeed = NW.rand.hashString(app.world.key) ^ 0x5bf03635;
+    swapWorld(app.drift || app.lowres);
   }
 
   /*
    * Sliders apply live against a coarse preview while dragging, then commit to
-   * full-resolution chunks on release. Terrain dials invalidate every cached
-   * chunk, so doing it the other way round would drop the framerate to a crawl.
+   * full-resolution chunks once the value settles. Terrain dials invalidate every
+   * cached chunk, so doing it the other way round would drop the framerate to a
+   * crawl.
+   *
+   * The end of a drag is detected by a quiet period, not by the `change` event:
+   * Chrome fires `change` on a range input on *every* drag step, not on release.
+   * Trusting it meant each step re-measured the world's statistics, respawned all
+   * six offspring, and flipped the preview between its two qualities — each flip
+   * invalidating the other's cache, so the preview rebuilt at full resolution
+   * every single frame. That alone was 90ms a frame on the latent sliders.
    */
+  var COMMIT_MS = 200;
+  var commitTimer = null;
+
+  function beginInteraction() {
+    app.lowres = true;
+    if (commitTimer) clearTimeout(commitTimer);
+    commitTimer = setTimeout(endInteraction, COMMIT_MS);
+  }
+
+  function endInteraction() {
+    commitTimer = null;
+    if (app.drift) return;      /* drift owns lowres; there is nothing to settle */
+    app.lowres = false;
+    rebuildWorld(false);
+    spawnCandidates();
+  }
+
   function bindSlider(id, label, fmt, apply) {
     var el = $(id);
     var lbl = $(label);
-    function commit() {
+    function live() {
       var v = parseFloat(el.value);
       lbl.textContent = fmt(v);
       apply(v);
+      beginInteraction();
     }
-    el.addEventListener('input', function () {
-      app.lowres = true;
-      commit();
-    });
-    el.addEventListener('change', function () {
-      app.lowres = false;
-      commit();
-      rebuildWorld(false);
-      spawnCandidates();
-    });
+    el.addEventListener('input', live);
+    el.addEventListener('change', live);
     lbl.textContent = fmt(parseFloat(el.value));
   }
 
@@ -649,23 +774,23 @@
     bindSlider('rngGain', 'vGain', function (v) { return v.toFixed(2); }, function (v) {
       app.spec.gain = v;
       app.spec.lineage = [];
-      app.world = new NW.world.World(app.spec, app.trainer.net);
+      swapWorld(app.lowres);
     });
     bindSlider('rngScale', 'vScale', function (v) { return String(v | 0); }, function (v) {
       app.spec.scale = v;
-      app.world = new NW.world.World(app.spec, app.trainer.net);
+      swapWorld(app.lowres);
     });
     bindSlider('rngSea', 'vSea', function (v) { return v.toFixed(2); }, function (v) {
       app.spec.sea = v;
-      app.world = new NW.world.World(app.spec, app.trainer.net);
+      swapWorld(app.lowres);
     });
     bindSlider('rngAuth', 'vAuth', function (v) { return (v * 100).toFixed(0) + '%'; }, function (v) {
       app.spec.auth = v;
-      app.world = new NW.world.World(app.spec, app.trainer.net);
+      swapWorld(app.lowres);
     });
     bindSlider('rngRivers', 'vRivers', function (v) { return v.toFixed(2); }, function (v) {
       app.spec.rivers = v;
-      app.world = new NW.world.World(app.spec, app.trainer.net);
+      swapWorld(app.lowres);
     });
     bindSlider('rngSigma', 'vSigma', function (v) { return v.toFixed(2); }, function () {});
 
@@ -673,22 +798,17 @@
       (function (k) {
         var el = $('z' + k);
         el.addEventListener('input', function () {
-          app.lowres = true;
           var z = app.spec.z.slice();
           z[k] = parseFloat(el.value);
-          setZ(z);
-        });
-        el.addEventListener('change', function () {
-          app.lowres = false;
-          rebuildWorld(false);
-          spawnCandidates();
+          setZ(z, false);
+          beginInteraction();
         });
       })(i);
     }
 
     $('btnRandZ').addEventListener('click', function () {
       var rnd = NW.rand.rng((Math.abs(app.cam.x * 7919 + app.cam.y * 104729) | 0) ^ (app.spec.lineage.length + 17));
-      setZ([0, 1, 2, 3].map(function () { return +(rnd() * 2.6 - 1.3).toFixed(2); }));
+      setZ([0, 1, 2, 3].map(function () { return +(rnd() * 2.6 - 1.3).toFixed(2); }), true);
       rebuildWorld(false);
       spawnCandidates();
     });
@@ -918,6 +1038,7 @@
       $('vz' + i).textContent = app.spec.z[i].toFixed(2);
     }
     wire();
+    watchStage();
     buildLegend();
     NW.ui.drawNet($('netCanvas'), null, null);
     startTraining(1337, 'Training the biome network');

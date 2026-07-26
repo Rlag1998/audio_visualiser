@@ -1,7 +1,7 @@
 /*
  * render.js — fields to pixels.
  *
- * Each chunk is rasterised once into a 48x48 offscreen canvas (one pixel per
+ * Each chunk is rasterised once into a small offscreen canvas (one pixel per
  * tile) and then blitted with nearest-neighbour scaling, so zooming costs
  * nothing and tiles stay crisp. Decorations — trees, rocks, cacti — are drawn
  * in a second pass in world space, only when tiles are big enough to see them.
@@ -462,9 +462,10 @@
     }
   }
 
-  /* Box-blur a canvas in place. Used once on a completed minimap. */
-  function blurCanvas(cv) {
-    var ctx = cv.getContext('2d');
+  /* Box-blur a canvas in place. Used once on a completed minimap. The caller
+   * passes its own context so it can have been created with willReadFrequently. */
+  function blurCanvas(cv, ctx) {
+    ctx = ctx || cv.getContext('2d');
     var img = ctx.getImageData(0, 0, cv.width, cv.height);
     boxBlur(img.data, cv.width, cv.height);
     ctx.putImageData(img, 0, 0);
